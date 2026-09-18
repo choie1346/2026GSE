@@ -61,31 +61,18 @@ void Renderer::Initialize(int windowSizeX, int windowSizeY)
 	m_PostProcessShader = CompileShaders("./Shaders/PostProcess.vs", "./Shaders/PostProcess.fs");
 	CreateVertexBufferObjects();
 	CreateSceneTarget();
-	const char* required[] = { "u_Color","u_Origin","u_Time","u_Material","u_RenderScale","u_Model","u_ModelScale","u_Flame" };
+	const char* required[] = { "u_Color","u_Origin","u_Time","u_Material","u_RenderScale" };
 	if (m_SolidRectShader) for (const char* name : required) {
-		if (Uniform(m_SolidRectShader, name) < 0) {
+		if (glGetUniformLocation(m_SolidRectShader, name) < 0) {
 			std::cerr << "Missing material uniform: " << name << std::endl;
 			glDeleteProgram(m_SolidRectShader); m_SolidRectShader = 0; m_DrawShader = 0;
 			break;
 		}
 	}
-	if (m_LakeShader && (Uniform(m_LakeShader, "u_GenericWater") < 0 ||
-		Uniform(m_LakeShader, "u_ModelScale") < 0)) {
-		std::cerr << "Lake shader is out of date. Copy Shaders and ShaderSources.generated.h together." << std::endl;
-		glDeleteProgram(m_LakeShader); m_LakeShader = 0;
-	}
-	if (m_SolidRectShader && glGetAttribLocation(m_SolidRectShader, "a_Tint") != 2) {
-		std::cerr << "Cached-model tint attribute is missing." << std::endl;
-		glDeleteProgram(m_SolidRectShader); m_SolidRectShader = 0; m_DrawShader = 0;
-	}
 
 	if (m_SolidRectShader > 0 && m_LakeShader > 0 && m_TextShader > 0 && m_PostProcessShader > 0 && m_SceneFramebuffer > 0 && m_VBORect > 0 && m_VBOTriangle > 0 && m_VBOFullscreen > 0)
 	{
 		m_Initialized = true;
-		using SwapInterval = BOOL(WINAPI*)(int);
-		PROC swapProc = wglGetProcAddress("wglSwapIntervalEXT");
-		if (reinterpret_cast<INT_PTR>(swapProc) > 3)
-			reinterpret_cast<SwapInterval>(swapProc)(1);
 	}
 	else {
 		MessageBoxW(nullptr, L"렌더링 초기화에 실패했습니다. 콘솔의 셰이더 오류를 확인해 주세요.", L"렌더링 오류", MB_OK | MB_ICONERROR);
@@ -116,8 +103,8 @@ void Renderer::SetMaterial(int material)
 {
 	m_DrawShader = (material == 3 || material == 8) && m_LakeShader ? m_LakeShader : m_SolidRectShader;
 	glUseProgram(m_DrawShader);
-	glUniform1i(Uniform(m_DrawShader, "u_Material"), material);
-	if (m_DrawShader == m_LakeShader)glUniform1i(Uniform(m_DrawShader, "u_GenericWater"), material == 8);
+	glUniform1i(glGetUniformLocation(m_DrawShader, "u_Material"), material);
+	if (m_DrawShader == m_LakeShader)glUniform1i(glGetUniformLocation(m_DrawShader, "u_GenericWater"), material == 8);
 }
 
 void Renderer::SetWorld(float cameraX, float cameraY, float time)
@@ -125,20 +112,20 @@ void Renderer::SetWorld(float cameraX, float cameraY, float time)
 	GLuint programs[] = { m_SolidRectShader, m_LakeShader };
 	for (GLuint program : programs) if (program) {
 		glUseProgram(program);
-		glUniform2f(Uniform(program, "u_Origin"), cameraX - m_WindowSizeX * .5f, cameraY - m_WindowSizeY * .5f);
-		glUniform1f(Uniform(program, "u_Time"), time);
-		glUniform1f(Uniform(program, "u_RenderScale"), (float)m_RenderScale);
+		glUniform2f(glGetUniformLocation(program, "u_Origin"), cameraX - m_WindowSizeX * .5f, cameraY - m_WindowSizeY * .5f);
+		glUniform1f(glGetUniformLocation(program, "u_Time"), time);
+		glUniform1f(glGetUniformLocation(program, "u_RenderScale"), (float)m_RenderScale);
 	}
 }
 
-void Renderer::DrawCachedModel(GLuint buffer, int vertexCount, float x, float y, float scale, float flash, int material)
+void Renderer::DrawCachedModel(GLuint buffer, int vertexCount, float x, float y, float scale, float flash)
 {
-	SetMaterial(material);
+	SetMaterial(0);
 	glUseProgram(m_DrawShader);
-	glUniform1i(Uniform(m_DrawShader, "u_Model"), 1);
-	glUniform2f(Uniform(m_DrawShader, "u_ModelScale"), 2.f * scale / m_WindowSizeX, 2.f * scale / m_WindowSizeY);
-	glUniform4f(Uniform(m_DrawShader, "u_Trans"), 2.f * x / m_WindowSizeX, 2.f * y / m_WindowSizeY, 0, 1);
-	glUniform4f(Uniform(m_DrawShader, "u_Color"), 1 + flash, 1 + flash, 1 + flash, 1);
+	glUniform1i(glGetUniformLocation(m_DrawShader, "u_Model"), 1);
+	glUniform2f(glGetUniformLocation(m_DrawShader, "u_ModelScale"), 2.f * scale / m_WindowSizeX, 2.f * scale / m_WindowSizeY);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Trans"), 2.f * x / m_WindowSizeX, 2.f * y / m_WindowSizeY, 0, 1);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Color"), 1 + flash, 1 + flash, 1 + flash, 1);
 	glBindBuffer(GL_ARRAY_BUFFER, buffer);
 	glEnableVertexAttribArray(0); glEnableVertexAttribArray(2);
 	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, sizeof(ModelVertex), 0);
@@ -146,13 +133,13 @@ void Renderer::DrawCachedModel(GLuint buffer, int vertexCount, float x, float y,
 	glVertexAttrib1f(1, 1);
 	glDrawArrays(GL_TRIANGLES, 0, vertexCount);
 	glDisableVertexAttribArray(0); glDisableVertexAttribArray(2);
-	glUniform1i(Uniform(m_DrawShader, "u_Model"), 0);
+	glUniform1i(glGetUniformLocation(m_DrawShader, "u_Model"), 0);
 }
 
 void Renderer::DrawFlame(float x, float y, float size)
 {
 	SetMaterial(7);
-	glUniform4f(Uniform(m_DrawShader, "u_Flame"),
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Flame"),
 		(x + m_WindowSizeX * .5f) * m_RenderScale, (y + m_WindowSizeY * .5f) * m_RenderScale, size * m_RenderScale, size * 2 * m_RenderScale);
 	DrawSolidQuad(x - size, y, x + size, y, x + size, y + size * 2, x - size, y + size * 2, 1, 1, 1, 1);
 	SetMaterial(0);
@@ -175,8 +162,8 @@ void Renderer::DrawShadow(float x, float y, float radius, float length)
 			&vertices[(i + 1) * 4], &vertices[(i + 1) * 4 + 1]);
 	}
 	glUseProgram(m_DrawShader);
-	glUniform4f(Uniform(m_DrawShader, "u_Trans"), 0, 0, 0, 1);
-	glUniform4f(Uniform(m_DrawShader, "u_Color"), .035f, .05f, .065f, .38f);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Trans"), 0, 0, 0, 1);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Color"), .035f, .05f, .065f, .38f);
 	glBindBuffer(GL_ARRAY_BUFFER, m_VBOTriangle);
 	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
 	glEnableVertexAttribArray(0);
@@ -204,9 +191,9 @@ void Renderer::EndFrame(float timeSeconds)
 	glUseProgram(m_PostProcessShader);
 	glActiveTexture(GL_TEXTURE0);
 	glBindTexture(GL_TEXTURE_2D, m_SceneTexture);
-	glUniform1i(Uniform(m_PostProcessShader, "u_Scene"), 0);
-	glUniform1f(Uniform(m_PostProcessShader, "u_Time"), timeSeconds);
-	glUniform2f(Uniform(m_PostProcessShader, "u_Resolution"), (float)m_WindowSizeX * m_RenderScale, (float)m_WindowSizeY * m_RenderScale);
+	glUniform1i(glGetUniformLocation(m_PostProcessShader, "u_Scene"), 0);
+	glUniform1f(glGetUniformLocation(m_PostProcessShader, "u_Time"), timeSeconds);
+	glUniform2f(glGetUniformLocation(m_PostProcessShader, "u_Resolution"), (float)m_WindowSizeX * m_RenderScale, (float)m_WindowSizeY * m_RenderScale);
 
 	int attribPosition = glGetAttribLocation(m_PostProcessShader, "a_Position");
 	glEnableVertexAttribArray(attribPosition);
@@ -287,8 +274,7 @@ void Renderer::CreateSceneTarget()
 	glGenTextures(1, &m_SceneTexture);
 	GLint maxTextureSize = 0;
 	glGetIntegerv(GL_MAX_TEXTURE_SIZE, &maxTextureSize);
-	// Postprocessing already smooths edges; avoid four times the fragment work on large windows.
-	m_RenderScale = 1;
+	m_RenderScale = m_WindowSizeX * 2u <= (unsigned)maxTextureSize && m_WindowSizeY * 2u <= (unsigned)maxTextureSize ? 2 : 1;
 	glBindTexture(GL_TEXTURE_2D, m_SceneTexture);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
 	glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
@@ -391,8 +377,8 @@ void Renderer::DrawSolidRect(float x, float y, float z, float size, float r, flo
 
 	glUseProgram(m_DrawShader);
 
-	glUniform4f(Uniform(m_DrawShader, "u_Trans"), newX, newY, 0, size);
-	glUniform4f(Uniform(m_DrawShader, "u_Color"), r, g, b, a);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Trans"), newX, newY, 0, size);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Color"), r, g, b, a);
 
 	int attribPosition = glGetAttribLocation(m_DrawShader, "a_Position");
 	glEnableVertexAttribArray(attribPosition);
@@ -418,8 +404,8 @@ void Renderer::DrawSolidTriangle(float x1, float y1, float x2, float y2, float x
 
 	glUseProgram(m_DrawShader);
 
-	glUniform4f(Uniform(m_DrawShader, "u_Trans"), 0.f, 0.f, 0.f, 1.f);
-	glUniform4f(Uniform(m_DrawShader, "u_Color"), r, g, b, a);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Trans"), 0.f, 0.f, 0.f, 1.f);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Color"), r, g, b, a);
 
 	int attribPosition = glGetAttribLocation(m_DrawShader, "a_Position");
 	glEnableVertexAttribArray(attribPosition);
@@ -435,22 +421,8 @@ void Renderer::DrawSolidTriangle(float x1, float y1, float x2, float y2, float x
 
 void Renderer::DrawSolidQuad(float x1, float y1, float x2, float y2, float x3, float y3, float x4, float y4, float r, float g, float b, float a)
 {
-	float vertices[18] = {};
-	GetGLPosition(x1, y1, &vertices[0], &vertices[1]);
-	GetGLPosition(x2, y2, &vertices[3], &vertices[4]);
-	GetGLPosition(x3, y3, &vertices[6], &vertices[7]);
-	GetGLPosition(x1, y1, &vertices[9], &vertices[10]);
-	GetGLPosition(x3, y3, &vertices[12], &vertices[13]);
-	GetGLPosition(x4, y4, &vertices[15], &vertices[16]);
-	glUseProgram(m_DrawShader);
-	glUniform4f(Uniform(m_DrawShader, "u_Trans"), 0, 0, 0, 1);
-	glUniform4f(Uniform(m_DrawShader, "u_Color"), r, g, b, a);
-	glBindBuffer(GL_ARRAY_BUFFER, m_VBOTriangle);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(vertices), vertices, GL_STREAM_DRAW);
-	glEnableVertexAttribArray(0);
-	glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, 3 * sizeof(float), 0);
-	glDrawArrays(GL_TRIANGLES, 0, 6);
-	glDisableVertexAttribArray(0);
+	DrawSolidTriangle(x1, y1, x2, y2, x3, y3, r, g, b, a);
+	DrawSolidTriangle(x1, y1, x3, y3, x4, y4, r, g, b, a);
 }
 
 void Renderer::DrawSolidEllipse(float x, float y, float radiusX, float radiusY, int segments, float r, float g, float b, float a)
@@ -472,8 +444,8 @@ void Renderer::DrawSolidEllipse(float x, float y, float radiusX, float radiusY, 
 			&vertices[(i + 1) * 3], &vertices[(i + 1) * 3 + 1]);
 	}
 	glUseProgram(m_DrawShader);
-	glUniform4f(Uniform(m_DrawShader, "u_Trans"), 0, 0, 0, 1);
-	glUniform4f(Uniform(m_DrawShader, "u_Color"), r, g, b, a);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Trans"), 0, 0, 0, 1);
+	glUniform4f(glGetUniformLocation(m_DrawShader, "u_Color"), r, g, b, a);
 	GLint position = glGetAttribLocation(m_DrawShader, "a_Position");
 	glBindBuffer(GL_ARRAY_BUFFER, m_VBOTriangle);
 	glBufferData(GL_ARRAY_BUFFER, (segments + 2) * 3 * sizeof(float), vertices, GL_STREAM_DRAW);
@@ -590,8 +562,8 @@ void Renderer::DrawText(float x, float y, const wchar_t* text, float r, float g,
 			float w = glyph.width * .5f, h = glyph.height * .5f;
 			glUseProgram(m_TextShader);
 			glBindTexture(GL_TEXTURE_2D, glyph.texture);
-			glUniform1i(Uniform(m_TextShader, "u_Glyph"), 0);
-			glUniform4f(Uniform(m_TextShader, "u_TextRect"), left + m_WindowSizeX * .5f, bottom + m_WindowSizeY * .5f, w, h);
+			glUniform1i(glGetUniformLocation(m_TextShader, "u_Glyph"), 0);
+			glUniform4f(glGetUniformLocation(m_TextShader, "u_TextRect"), left + m_WindowSizeX * .5f, bottom + m_WindowSizeY * .5f, w, h);
 			DrawSolidQuad(left, bottom, left + w, bottom, left + w, bottom + h, left, bottom + h, r, g, b, a);
 		}
 		x += glyph.advance * .5f;
@@ -604,14 +576,4 @@ void Renderer::GetGLPosition(float x, float y, float* newX, float* newY)
 {
 	*newX = x * 2.f / m_WindowSizeX;
 	*newY = y * 2.f / m_WindowSizeY;
-}
-
-GLint Renderer::Uniform(GLuint program, const char* name)
-{
-	auto& uniforms = m_Uniforms[program];
-	auto found = uniforms.find(name);
-	if (found != uniforms.end())return found->second;
-	GLint location = glGetUniformLocation(program, name);
-	uniforms.emplace(name, location);
-	return location;
 }

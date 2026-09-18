@@ -8,7 +8,6 @@
 
 #include "Dependencies\glew.h"
 
-// Windows maps DrawText to DrawTextW; keep the C++ member name identical in every translation unit.
 #ifdef DrawText
 #undef DrawText
 #endif
@@ -17,7 +16,7 @@ class Renderer
 {
 public:
 	struct ModelVertex { float x, y, r, g, b, a; };
-	void DrawCachedModel(GLuint buffer, int vertexCount, float x, float y, float scale = 1.f, float flash = 0.f, int material = 0);
+	void DrawCachedModel(GLuint buffer, int vertexCount, float x, float y, float scale = 1.f, float flash = 0.f);
 	void DrawFlame(float x, float y, float size);
 	Renderer(int windowSizeX, int windowSizeY);
 	~Renderer();
@@ -41,7 +40,6 @@ private:
 	bool ReadFile(const char* filename, std::string* target);
 	bool AddShader(GLuint ShaderProgram, const char* pShaderText, GLenum ShaderType);
 	GLuint CompileShaders(const char* filenameVS, const char* filenameFS);
-	GLint Uniform(GLuint program, const char* name);
 	void CreateVertexBufferObjects();
 	void CreateSceneTarget();
 	void DestroySceneTarget();
@@ -71,6 +69,5 @@ private:
 	int m_RenderScale = 1;
 	void* m_TextFont = NULL;
 	std::map<wchar_t, Glyph> m_TextGlyphs;
-	std::map<GLuint, std::map<std::string, GLint>> m_Uniforms;
 };
 

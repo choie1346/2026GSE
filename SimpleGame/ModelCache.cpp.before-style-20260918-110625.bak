@@ -1,0 +1,101 @@
+#include "stdafx.h"
+#define NOMINMAX
+#include <windows.h>
+#include "ModelCache.h"
+#include <cmath>
+#include <cstdint>
+#include <cstdio>
+#include <utility>
+
+namespace {
+using Vertex=Renderer::ModelVertex;
+static_assert(sizeof(Vertex)==6*sizeof(float),"Cache vertex layout changed; increment the version.");
+using Vertices=std::vector<Vertex>;
+struct Color {float r,g,b,a;};
+void triangle(Vertices& v,float ax,float ay,float bx,float by,float cx,float cy,Color c) {
+    v.push_back({ax,ay,c.r,c.g,c.b,c.a});v.push_back({bx,by,c.r,c.g,c.b,c.a});v.push_back({cx,cy,c.r,c.g,c.b,c.a});
+}
+void rectangle(Vertices& v,float x,float y,float w,float h,Color c) {
+    triangle(v,x-w/2,y-h/2,x+w/2,y-h/2,x+w/2,y+h/2,c);
+    triangle(v,x-w/2,y-h/2,x+w/2,y+h/2,x-w/2,y+h/2,c);
+}
+void oval(Vertices& v,float x,float y,float rx,float ry,Color c) {
+    for(int i=0;i<40;++i) {float a=i*6.2831853f/40,b=(i+1)*6.2831853f/40;
+        triangle(v,x,y,x+std::cos(a)*rx,y+std::sin(a)*ry,x+std::cos(b)*rx,y+std::sin(b)*ry,c);}
+}
+uint32_t checksum(const Vertices& v) {
+    uint32_t result=2166136261u;
+    const auto* bytes=reinterpret_cast<const unsigned char*>(v.data());
+    for(size_t i=0;i<v.size()*sizeof(Vertex);++i) result=(result^bytes[i])*16777619u;
+    return result;
+}
+}
+ModelCache::~ModelCache() {for(auto& m:models)if(m.buffer)glDeleteBuffers(1,&m.buffer);}
+void ModelCache::Build() {
+    models.clear();models.resize(22);
+    for(int type=0;type<2;++type)for(int frame=0;frame<8;++frame) {
+        auto& v=models[type*8+frame].vertices;
+        float step=std::sin(frame*6.2831853f/8)*4;
+        Color coat=type?Color{.47f,.37f,.39f,1}:Color{.25f,.44f,.65f,1};
+        for(int side=-1;side<=1;side+=2){oval(v,side*5.f,10+side*step,4,10,{.20f,.23f,.25f,1});oval(v,side*5.f,2+side*step,6,3,{.14f,.17f,.18f,1});}
+        oval(v,0,30,13,19,coat);oval(v,-3,33,8,14,{coat.r*1.2f,coat.g*1.2f,coat.b*1.2f,1});
+        rectangle(v,0,23,23,4,{.55f,.42f,.26f,1});
+        for(int side=-1;side<=1;side+=2){oval(v,side*14.f,30-side*step,4,11,coat);oval(v,side*14.f,20-side*step,3,4,{.76f,.60f,.47f,1});}
+        oval(v,0,51,9,11,{.25f,.24f,.23f,1});oval(v,1,49,7.5f,8,{.77f,.63f,.50f,1});
+        oval(v,-2,57,8,5,{.27f,.24f,.21f,1});
+        for(int side=-1;side<=1;side+=2)oval(v,side*3.f,50,1.2f,1.5f,type?Color{.94f,.42f,.22f,1}:Color{.13f,.16f,.18f,1});
+        rectangle(v,18,32,3,36,{.68f,.74f,.76f,1});rectangle(v,18,18,12,3,{.78f,.65f,.39f,1});
+        if(type){oval(v,0,59,11,4,{.35f,.39f,.40f,1});rectangle(v,-12,35,7,9,{.57f,.59f,.56f,1});}
+    }
+    auto& tree=models[16].vertices;rectangle(tree,0,27,12,54,{.30f,.26f,.20f,1});
+    for(int i=0;i<7;++i){float a=i*2.399f;oval(tree,std::cos(a)*18,70+std::sin(a)*19,26,27,{.16f+i*.014f,.35f+i*.018f,.24f+i*.008f,1});}
+    auto& rock=models[17].vertices;oval(rock,0,9,28,18,{.36f,.42f,.43f,1});oval(rock,-7,16,19,12,{.53f,.58f,.56f,1});
+    auto& loot=models[18].vertices;oval(loot,0,9,8,10,{.46f,.63f,.60f,1});rectangle(loot,0,20,5,6,{.83f,.71f,.44f,1});oval(loot,-2,12,3,5,{.76f,.91f,.85f,1});
+    auto& camp=models[19].vertices;
+    for(int i=0;i<8;++i){float a=i*6.2831853f/8;oval(camp,std::cos(a)*21,std::sin(a)*9,8,6,{.46f,.49f,.46f,1});}
+    rectangle(camp,0,5,32,7,{.33f,.24f,.16f,1});
+    auto& shard=models[20].vertices;
+    triangle(shard,0,25,-9,10,0,0,{.58f,.82f,.85f,1});triangle(shard,0,25,0,0,9,10,{.35f,.58f,.71f,1});
+    auto& sword=models[21].vertices;
+    rectangle(sword,0,20,5,29,{.75f,.83f,.87f,1});triangle(sword,-2.5f,34.5f,2.5f,34.5f,0,41,{.87f,.92f,.94f,1});
+    rectangle(sword,0,8,19,4,{.83f,.65f,.31f,1});rectangle(sword,0,2,4,12,{.41f,.28f,.17f,1});
+}
+bool ModelCache::Read(const std::wstring& path) {
+    FILE* file=nullptr;if(_wfopen_s(&file,path.c_str(),L"rb")!=0)return false;
+    uint32_t header[3]={};bool ok=fread(header,sizeof(header),1,file)==1&&header[0]==0x4D434831&&header[1]==2&&header[2]==22;
+    std::vector<Mesh> loaded(22);
+    for(auto& m:loaded) {
+        if(!ok)break;uint32_t count=0,hash=0;
+        ok=fread(&count,4,1,file)==1&&fread(&hash,4,1,file)==1&&count>0&&count<=30000&&count%3==0;
+        if(!ok)break;m.vertices.resize(count);
+        ok=fread(m.vertices.data(),sizeof(Vertex),count,file)==count&&checksum(m.vertices)==hash;
+        for(const auto& v:m.vertices)if(!std::isfinite(v.x)||!std::isfinite(v.y)||std::abs(v.x)>512||std::abs(v.y)>512||
+            !std::isfinite(v.r)||!std::isfinite(v.g)||!std::isfinite(v.b)||!std::isfinite(v.a)||v.a<0||v.a>1)ok=false;
+    }
+    if(ok&&fgetc(file)!=EOF)ok=false;fclose(file);
+    if(ok)models=std::move(loaded);return ok;
+}
+bool ModelCache::Write(const std::wstring& path) const {
+    std::wstring temp=path+L"."+std::to_wstring(GetCurrentProcessId())+L".tmp";
+    FILE* file=nullptr;if(_wfopen_s(&file,temp.c_str(),L"wb")!=0)return false;
+    uint32_t header[]={0x4D434831,2,22};bool ok=fwrite(header,sizeof(header),1,file)==1;
+    for(const auto& m:models){uint32_t count=(uint32_t)m.vertices.size(),hash=checksum(m.vertices);
+        ok=ok&&fwrite(&count,4,1,file)==1&&fwrite(&hash,4,1,file)==1&&fwrite(m.vertices.data(),sizeof(Vertex),count,file)==count;}
+    if(fclose(file)!=0)ok=false;
+    if(ok)ok=MoveFileExW(temp.c_str(),path.c_str(),MOVEFILE_REPLACE_EXISTING|MOVEFILE_WRITE_THROUGH)!=0;
+    if(!ok)DeleteFileW(temp.c_str());return ok;
+}
+void ModelCache::Load() {
+    if(!models.empty())return;
+    wchar_t folder[32768]={};DWORD length=GetEnvironmentVariableW(L"LOCALAPPDATA",folder,32768);
+    std::wstring path;
+    if(length>0&&length<32768){path=std::wstring(folder)+L"\\MoonlitVillage";CreateDirectoryW(path.c_str(),nullptr);path+=L"\\models-v2.bin";}
+    if(!path.empty()&&Read(path))status=L"모델 캐시 불러옴";
+    else {Build();status=!path.empty()&&Write(path)?L"모델 캐시 저장 완료":L"모델 캐시 저장 실패: 이번 실행은 메모리 모델 사용";}
+    for(auto& m:models){glGenBuffers(1,&m.buffer);glBindBuffer(GL_ARRAY_BUFFER,m.buffer);
+        glBufferData(GL_ARRAY_BUFFER,m.vertices.size()*sizeof(Vertex),m.vertices.data(),GL_STATIC_DRAW);}
+}
+void ModelCache::Draw(Renderer& r,int model,float x,float y,float scale,float flash) const {
+    if(model<0||model>=(int)models.size())return;
+    const auto& m=models[model];r.DrawCachedModel(m.buffer,(int)m.vertices.size(),x,y,scale,flash);
+}

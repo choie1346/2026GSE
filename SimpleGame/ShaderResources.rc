@@ -1,0 +1,7 @@
+#include <windows.h>
+101 RCDATA "Shaders/SolidRect.vs"
+102 RCDATA "Shaders/SolidRect.fs"
+103 RCDATA "Shaders/Lake.fs"
+104 RCDATA "Shaders/PostProcess.vs"
+105 RCDATA "Shaders/PostProcess.fs"
+106 RCDATA "Shaders/Text.fs"

@@ -2,8 +2,6 @@
 
 layout(location=0) out vec4 FragColor;
 in float v_Coverage;
-in vec4 v_Tint;
-uniform vec4 u_Flame;
 
 uniform vec4 u_Color;
 uniform int u_Material;
@@ -21,17 +19,7 @@ float noise(vec2 p) {
 void main()
 {
 	vec2 p=gl_FragCoord.xy/max(u_RenderScale,1.0)+u_Origin;
-	vec3 color=u_Color.rgb*v_Tint.rgb;
-    if(u_Material==7) {
-        vec2 uv=(gl_FragCoord.xy-u_Flame.xy)/u_Flame.zw;
-        float n=noise(vec2(uv.x*4.0,uv.y*5.0-u_Time*3.8));
-        float sway=sin(uv.y*5.0-u_Time*4.0)*.10*uv.y;
-        float edge=(1.0-uv.y)*.65-abs(uv.x+sway)+(n-.5)*.23;
-        float coverage=smoothstep(-.06,.07,edge)*smoothstep(0.0,.08,uv.y);
-        vec3 fire=mix(vec3(1.0,.20,.045),vec3(1.0,.90,.42),clamp(edge*2.5,0.0,1.0));
-        FragColor=vec4(fire,coverage*(1.0-smoothstep(.85,1.0,uv.y)));
-        return;
-    }
+	vec3 color=u_Color.rgb;
     if(u_Material==6) {
         vec2 offset=gl_FragCoord.xy-u_Shadow.xy;
         vec2 direction=normalize(vec2(.88,-.47));
@@ -53,7 +41,7 @@ void main()
         color*=mix(0.70,1.05,mortar)*(0.92+noise(p*.18)*.16);
     } else if(u_Material==2) {
         float patches=noise(p*.025);
-        color=mix(vec3(.24,.29,.19),color,smoothstep(.20,.64,patches));
+        color=mix(vec3(.24,.29,.19),u_Color.rgb,smoothstep(.20,.64,patches));
         color*=.84+noise(p*.18)*.27;
         vec2 blades=vec2(p.x*.8,p.y*.13+sin(p.x*.15+u_Time*.8)*.22);
         float blade=pow(noise(blades),6.0);
@@ -78,5 +66,5 @@ void main()
         color*=.92+.11*clouds;
         color*=vec3(1.035,1.01,.965);
     }
-	FragColor = vec4(color,u_Color.a*v_Tint.a*v_Coverage);
+	FragColor = vec4(color,u_Color.a*v_Coverage);
 }

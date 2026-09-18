@@ -2,10 +2,6 @@
 
 layout(location=0) in vec3 a_Position;
 layout(location=1) in float a_Coverage;
-layout(location=2) in vec4 a_Tint;
-uniform bool u_Model;
-uniform vec2 u_ModelScale;
-out vec4 v_Tint;
 out float v_Coverage;
 uniform vec4 u_Trans;
 
@@ -13,8 +9,6 @@ void main()
 {
 	vec4 newPosition;
 	newPosition.xy = a_Position.xy*u_Trans.w + u_Trans.xy;
-    if(u_Model) newPosition.xy=a_Position.xy*u_ModelScale+u_Trans.xy;
-    v_Tint=u_Model?a_Tint:vec4(1.0);
 	newPosition.z = 0;
 	newPosition.w= 1;
 	gl_Position = newPosition;

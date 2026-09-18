@@ -10,6 +10,8 @@
 #include "Dependencies/glew.h"
 #include "Dependencies/freeglut.h"
 #include "Renderer.h"
+#include "FirstLevel.h"
+bool firstLevelActive=true;
 
 struct V { float x, y; };
 struct C { float r, g, b, a; };
@@ -19,11 +21,11 @@ struct Tree { V p; float size; };
 struct Pillar { V p; float height; };
 struct Herb { V p; bool picked; };
 const int MapSize = 36;
-const V Lake = { 27, 24 }, Ruin = { 26, 9 }, Bell = { 18, 17 }, Well = { 16, 18 };
+const V Lake = {27, 24}, Ruin = {26, 9}, Bell = {18, 17}, Well = {16, 18};
 Renderer* renderer = nullptr;
-int width = 1280, height = 800, stage = 0, collected = 0;
+int width = 1600, height = 1000, stage = 0, collected = 0;
 float timeNow = 0, lastTime = 0, walk = 0, messageTime = 0;
-V player = { 18, 19 }, camera = {}, facing = { 0, -1 };
+V player = {18, 19}, camera = {}, facing = {0, -1};
 bool keys[256] = {}, moving = false;
 std::wstring message;
 std::vector<Person> people;
@@ -31,292 +33,416 @@ std::vector<Building> buildings;
 std::vector<Tree> trees;
 std::vector<Pillar> pillars;
 std::vector<Herb> herbs;
-float dist(V a, V b) { return std::hypot(a.x - b.x, a.y - b.y); }
-V iso(V p) { return { (p.x - p.y) * 42, -(p.x + p.y) * 21 }; }
-V screen(V p) { V s = iso(p); return { s.x - camera.x,s.y - camera.y }; }
-C shade(C c, float s) { return { c.r * s,c.g * s,c.b * s,c.a }; }
-void rect(float x, float y, float w, float h, C c) {
-    renderer->DrawSolidQuad(x - w / 2, y - h / 2, x + w / 2, y - h / 2, x + w / 2, y + h / 2, x - w / 2, y + h / 2, c.r, c.g, c.b, c.a);
+float dist(V a, V b) { return std::hypot(a.x-b.x, a.y-b.y); }
+V iso(V p) { return {(p.x-p.y)*42, -(p.x+p.y)*21}; }
+V screen(V p) { V s=iso(p); return {s.x-camera.x,s.y-camera.y}; }
+C shade(C c,float s) { return {c.r*s,c.g*s,c.b*s,c.a}; }
+void rect(float x,float y,float w,float h,C c) {
+    renderer->DrawSolidQuad(x-w/2,y-h/2,x+w/2,y-h/2,x+w/2,y+h/2,x-w/2,y+h/2,c.r,c.g,c.b,c.a);
 }
-void tri(V a, V b, V d, C c) { renderer->DrawSolidTriangle(a.x, a.y, b.x, b.y, d.x, d.y, c.r, c.g, c.b, c.a); }
-void ellipse(float x, float y, float rx, float ry, C c) { renderer->DrawSolidEllipse(x, y, rx, ry, 32, c.r, c.g, c.b, c.a); }
-void diamond(V p, float w, float h, C c) {
-    renderer->DrawSolidQuad(p.x, p.y + h / 2, p.x + w / 2, p.y, p.x, p.y - h / 2, p.x - w / 2, p.y, c.r, c.g, c.b, c.a);
+void tri(V a,V b,V d,C c) { renderer->DrawSolidTriangle(a.x,a.y,b.x,b.y,d.x,d.y,c.r,c.g,c.b,c.a); }
+void ellipse(float x,float y,float rx,float ry,C c) { renderer->DrawSolidEllipse(x,y,rx,ry,32,c.r,c.g,c.b,c.a); }
+void diamond(V p,float w,float h,C c) {
+    renderer->DrawSolidQuad(p.x,p.y+h/2,p.x+w/2,p.y,p.x,p.y-h/2,p.x-w/2,p.y,c.r,c.g,c.b,c.a);
 }
-bool visible(V p, float margin = 150) { V s = screen(p); return std::abs(s.x) < width / 2 + margin && std::abs(s.y) < height / 2 + margin; }
-void text(float x, float y, const std::wstring& s, C c = { .92f,.94f,.89f,1 }) { renderer->DrawText(x, y, s.c_str(), c.r, c.g, c.b, c.a); }
-void say(const std::wstring& s) { message = s; messageTime = 10; }
-bool lake(V p) { return std::pow((p.x - Lake.x) / 5.8f, 2) + std::pow((p.y - Lake.y) / 4.5f, 2) < 1; }
-bool ruin(V p) { return dist(p, Ruin) < 3.5f; }
+bool visible(V p,float margin=150) { V s=screen(p); return std::abs(s.x)<width/2+margin && std::abs(s.y)<height/2+margin; }
+void text(float x,float y,const std::wstring& s,C c={.92f,.94f,.89f,1}) { renderer->DrawText(x,y,s.c_str(),c.r,c.g,c.b,c.a); }
+void say(const std::wstring& s) { message=s; messageTime=10; }
+bool lake(V p) { return std::pow((p.x-Lake.x)/5.8f,2)+std::pow((p.y-Lake.y)/4.5f,2)<1; }
+bool ruin(V p) { return dist(p,Ruin)<3.5f; }
+struct Curve { V a,b,c,d; };
+const Curve paths[] = {
+    {{18,18},{15,20},{12,16},{10.8f,12.2f}},
+    {{18,18},{20,19.2f},{21,18.5f},{23,20.2f}},
+    {{18,18},{16.9f,14},{19.5f,12},{18,10}},
+    {{18,10},{20,8.8f},{23,11.4f},{26,9}},
+    {{18,18},{19,21},{17,23},{18,26}}
+};
+V curvePoint(const Curve& c,float t) {
+    float s=1-t;
+    return {s*s*s*c.a.x+3*s*s*t*c.b.x+3*s*t*t*c.c.x+t*t*t*c.d.x,
+        s*s*s*c.a.y+3*s*s*t*c.b.y+3*s*t*t*c.c.y+t*t*t*c.d.y};
+}
 bool road(V p) {
-    return (p.x > 15 && p.x < 21 && p.y>15 && p.y < 21) ||
-        (std::abs(p.y - 18) < .85f && p.x > 9 && p.x < 26) ||
-        (std::abs(p.x - 18) < .8f && p.y > 9 && p.y < 25) ||
-        (std::abs(p.y - 10) < .8f && p.x > 17 && p.x < 28) ||
-        (std::abs(p.x - 11) < .8f && p.y > 12 && p.y < 19);
+    if(dist(p,{18,18})<2.4f) return true;
+    for(const auto& c:paths) for(int i=0;i<=48;++i) if(dist(p,curvePoint(c,i/48.f))<.85f) return true;
+    return false;
 }
 bool blocked(V p) {
-    if (p.x < .5f || p.y < .5f || p.x>35.5f || p.y>35.5f || lake(p) || dist(p, Well) < .6f) return true;
-    for (const auto& b : buildings) if (std::abs(p.x - b.p.x) < .85f && std::abs(p.y - b.p.y) < .85f) return true;
-    for (const auto& t : trees) if (dist(p, t.p) < .28f) return true;
-    for (const auto& t : pillars) if (dist(p, t.p) < .42f) return true;
+    if(p.x<.5f||p.y<.5f||p.x>35.5f||p.y>35.5f||lake(p)||dist(p,Well)<.6f) return true;
+    for(const auto& b:buildings) if(std::abs(p.x-b.p.x)<.85f&&std::abs(p.y-b.p.y)<.85f) return true;
+    for(const auto& t:trees) if(dist(p,t.p)<.28f) return true;
+    for(const auto& t:pillars) if(dist(p,t.p)<.42f) return true;
     return false;
 }
 void reset() {
-    stage = collected = 0; player = { 18,19 }; walk = 0; moving = false;
-    std::fill(keys, keys + 256, false);
-    buildings = { {{14,15},{.52f,.22f,.19f,1}},{{20,14},{.29f,.38f,.43f,1}},
+    stage=collected=0; player={18,19}; walk=0; moving=false;
+    std::fill(keys,keys+256,false);
+    buildings={{{14,15},{.52f,.22f,.19f,1}},{{20,14},{.29f,.38f,.43f,1}},
         {{14,21},{.45f,.24f,.32f,1}},{{22,17},{.48f,.29f,.17f,1}},
         {{20,23},{.28f,.38f,.34f,1}},{{16,24},{.52f,.24f,.19f,1}},
-        {{12,17},{.27f,.34f,.43f,1}},{{24,15},{.46f,.26f,.24f,1}},{{15,12},{.35f,.37f,.39f,1}} };
-    people = {
-        {L"¸¶¶ó ÃÌÀå",{17,16},{.47f,.35f,.54f,1},{L"¿Ô±¸³ª. Àú³á Á¾À» ¿ï·Á¾ß ÇÏ´Âµ¥ ¾àÃÊ°¡ ¸ğÀÚ¶ó³×. Àá±ñ µµ¿ÍÁÖ°Ú´Ï?",L"½£ ÀÔ±¸, È£¼ı°¡, ¿¾ ¿¹¹è´ç¿¡ ÇÏ³ª¾¿ ÀÖ´Ü´Ù. ¼¼ Æ÷±â¸é ÃæºĞÇØ.",L"¼ö°íÇß´Ù. ¡¦¾Æ´Ï, ¹æ±İ ´©±¸¿Í ÇÔ²² ¿Â °Í °°¾Æ¼­."},0},
-        {L"¾îºÎ Åäº¥",{23,19},{.23f,.46f,.54f,1},{L"¿À´ÃÀº ºó ±×¹°¸¸ ¼¼ ¹ø °ÇÁ³¾î. ¹°°í±âµéµµ Á¾¼Ò¸®¸¦ ±â´Ù¸®³ª ºÁ.",L"È£¼ı°¡ ¾èÀº µ¹¹çÀ» Ã£¾ÆºÁ. Çª¸¥ ²ÉÀÌ ÇÏ³ª º¸ÀÏ °Å¾ß.",L"¹°ÀÌ ÀáÀáÇØÁ³³×. ³»ÀÏÀº ¹è¸¦ ¶ç¿ï ¼ö ÀÖ°Ú¾î."},0},
-        {L"»§Áı ÁÖÀÎ ÀÏÁ¦",{13,19},{.72f,.46f,.29f,1},{L"¸· ±¸¿î »§ ³¿»õ°¡ ³ªÁö? ´Ã ÇÏ³ª¾¿ ³²´Âµ¥, ¿À´Ãµµ ¼ÕÀÌ ¸ÕÀú ¿òÁ÷¿´³×.",L"µ¹¾Æ¿À´Â ±æ¿¡ µé·¯. µû¶æÇÑ °É·Î ³²°Ü µÑ°Ô.",L"»§ ÇÏ³ª¸¦ µû·Î µ×´Âµ¥¡¦ ´©±¸ ¸òÀÌ¾ú´õ¶ó?"},0},
-        {L"°æºñº´ ·»",{19,15.5f},{.35f,.41f,.47f,1},{L"ºÏÂÊ ±æÀº ¿­·Á ÀÖ¾î. ¹«³ÊÁø µ¹´ã¿¡´Â °¡±îÀÌ °¡Áö ¸¶.",L"¿¹¹è´çÀº ºÏÂÊ °¥¸²±æ¿¡¼­ µ¿ÂÊÀ¸·Î. ±âµÕ »çÀÌ·Î µé¾î°¡¸é µÅ.",L"ÃâÀÔ ÀåºÎ°¡ ÇÑ Àå ºñ¾ú±º. ¾ÆÄ§¿¡´Â ºĞ¸í Àû¾î µ×´Âµ¥."},0},
-        {L"´Ï¾Æ",{18,21},{.77f,.43f,.49f,1},{L"¿ì¸® Áı ½ÄÅ¹¿¡´Â ÀÇÀÚ°¡ ÇÏ³ª ´õ ÀÖ¾î. ¾Æ¹«µµ °Å±â ¾ÉÀ¸¸é ¾È µÈ´ë.",L"¾àÃÊ Ã£´Â °Å¾ß? ¹İÂ¦ÀÌ´Â ²ÉÀÌ¸é ³ªµµ ºÃ¾î!",L"¾ö¸¶°¡ ÀÇÀÚ´Â ¿ø·¡ ¼¼ °³¿´´ë. ³»°¡ Àß¸ø ¼Ã³ª?"},0},
-        {L"¾àÃÊ²Û ¿À¸°",{11,18},{.31f,.53f,.35f,1},{L"Çª¸¥ ²ÉÀÙ¿¡ Àººû ÁÙ±â°¡ ÀÖÀ¸¸é ´ŞºûÇ®ÀÌÁö. ´Ù¸¥ Ç®°ú Çò°¥¸®Áø ¾ÊÀ» °Å¾ß.",L"»Ñ¸®´Â ³²°Ü µÎ·Å. ³»³â¿¡µµ ²ÉÀ» ºÁ¾ß ÇÏ´Ï±î.",L"¼ÕÀ» ¾Ä¾îµµ ÇâÀÌ ³²À» °Å¾ß. ÇÏ·çÂë Áö³ª¸é ±¦Âú¾Æ."},0},
-        {L"Á÷Á¶°ø ¼¿¶ó",{15,22},{.57f,.43f,.63f,1},{L"¿Ê ¾ÈÂÊ¿¡ ÀÌ¸§À» ¼ö³õ´Â ÁßÀÌ¾ß. ÀÒ¾î¹ö·Áµµ ÁÖÀÎÀ» Ã£À» ¼ö ÀÖ°Ô.",L"½£ ÀÔ±¸¿¡ ³»°¡ ¹­¾î µĞ ºÓÀº ÃµÀÌ ÀÖ¾î. ±×ÂÊÀ¸·Î °¡ ºÁ.",L"ÀÌ ¿ÊÀÇ ÁÖÀÎÀÌ ´©±¸¿´Áö? ÀÌ¸§±îÁö Áö¿öÁ³³×."},0},
-        {L"¼ø·ÊÀÚ ¿¡´Ù",{21,20},{.66f,.59f,.34f,1},{L"ÇÏ·í¹ã ¹¬À¸·Á´Ù »çÈêÂ°¾ß. ÀÌ ¸¶À», ÀÌ»óÇÏ°Ô ¹ß±æÀÌ ¾È ¶³¾îÁ®.",L"¿¾ ¿¹¹è´ç¿¡´Â ÀÌ¸§À» »õ±ä µ¹ÀÌ ÀÖ¾î. ´©°¡ ¸ğµÎ ±Ü¾î ³õ¾Ò´õ±º.",L"³»ÀÏÀº ¶°³ª·Á°í. ³»°¡ ¾îµğ¼­ ¿Ô´ÂÁö ¾ÆÁ÷ ±â¾ïÇÒ ¶§."},0},
-        {L"¹æ¾Ñ°£Áö±â µ·",{19,24},{.48f,.43f,.34f,1},{L"¹Ğ°¡·ç ¹è´ŞÀÌ ÇÏ³ª ³²¾Ò¾î. ÁÖ¼Ò°¡ ¾ø¾î¼­ Á¾ÀÏ µé°í ´Ù´Ï³×.",L"±¤ÀåÀ¸·Î µ¹¾Æ¿À¸é Á¾ºÎÅÍ Ã£¾Æ. ÇØ°¡ ±İ¹æ ³Ñ¾î°¥ °Å¾ß.",L"¹è´ŞÀº ´Ù ³¡³µ¾î. ºó ÀÚ·ç¸¦ ¿Ö µé°í ÀÖ¾ú´ÂÁö ¸ğ¸£°Ú±º."},0},
-        {L"µµ¿¹°¡ ÁÖ¸®",{13,15.8f},{.61f,.34f,.27f,1},{L"È£¼ö ÁøÈëÀ¸·Î ºúÀ¸¸é À¯¾àÀÌ Çª¸£°Ô ³ª¿Í. ´Ù¸¥ °÷ ÈëÀ¸·Î´Â ¾È µÅ.",L"¿¾ ¿¹¹è´ç ¹Ù´Úµµ °°Àº ÈëÀ¸·Î ±¸¿ü´ë. Áö±İÀº ÀÌ³¢Åõ¼ºÀÌÁö¸¸.",L"°¡¸¶ ¼Ó ±×¸©ÀÌ ÇÏ³ª ±úÁ³¾î. Á¾ÀÌ ¿ï¸± ¶§¿´³ª."},0},
-        {L"¸¶±¸°£Áö±â Ä«µ¥",{23,16.5f},{.39f,.46f,.34f,1},{L"¸»µéÀÌ ºÏÂÊ ±æ¸¸ º¸¸é ¸ØÃç ¼­. ¿¹Àü¿¡´Â Àß ´Ù³æ´Âµ¥.",L"µ¹¾Æ¿Ã ¶© ±¤Àå ÂÊÀ¸·Î ¿Í. ½£ ¾ÈÂÊÀº ±æÀÌ ²÷°å¾î.",L"¸»µéÀÌ ÀÌÁ¦ Á¶¿ëÇÏ³×. ¿À´ÃÀº Ç« ÀÚ°Ú¾î."},0},
-        {L"Á¤¿ø»ç ¹Ì¶ó",{16,25.5f},{.43f,.57f,.35f,1},{L"´©°¡ È­´Ü¿¡ ¹ßÀÚ±¹À» ³²°å¾î. ¾ÆÀÌµéÇÑÅ× ¹°¾îµµ ¾Æ´Ï·¡.",L"´ŞºûÇ®Àº ¹â¾Æµµ ´Ù½Ã ÀÏ¾î³ª´õ¶ó. ±×·¡µµ Á¶½ÉÈ÷ ´Ù·ï Áà.",L"¹ßÀÚ±¹ÀÌ ¾ø¾îÁ³³×. ºñµµ ¾È ¿Ô´Âµ¥."},0},
-        {L"³ª·í¹è²Û º¸¶ó",{21,24},{.25f,.43f,.51f,1},{L"³ª·ç´Â ¹® ´İ¾Ò¾î. µ¹¾Æ¿À´Â ¹è°¡ ¾ø¾î¼­ ¸»ÀÌ¾ß.",L"È£¼ö´Â µ¹¾Æ¼­ °¡. ¾è¾Æ º¸¿©µµ ¹Ù´ÚÀÌ °©ÀÚ±â ²¨Á®.",L"¹è¸¦ ±â´Ù·È´Ù°í? ³ª´Â ¿À´Ã ÇÏ·ç Á¾ÀÏ ±×¹°À» ¼ÕºÃ´Âµ¥."},0},
-        {L"ÀÌ¾ß±â²Û À¯³ª",{16.7f,20.5f},{.64f,.32f,.36f,1},{L"¿¾³¯¿¡´Â Àú Á¾À» µÎ »ç¶÷ÀÌ ÇÔ²² ¿ï·È´ë. È¥ÀÚ¼­´Â ³Ê¹« ¹«°Å¿ü°Åµç.",L"¾î´À ³¯ºÎÅÍ È¥ÀÚ ¿ï¸± ¼ö ÀÖ°Ô µÆÁö. ±× µÚ ÀÌ¾ß±â´Â ¾Æ¹«µµ ¸ô¶ó.",L"Á¾Àº ¿ø·¡ ÇÑ »ç¶÷ÀÌ ¿ï¸®´Â °Å¾ß. ³»°¡ ´Ù¸¥ ¸»À» Çß´Ï?"},0},
-        {L"ºÏ¹®Áö±â ÇÏ³×",{18,11.5f},{.35f,.42f,.44f,1},{L"¿¹¹è´ç¿¡ °£´Ù¸é ³·¿¡ ´Ù³à¿Í. ¹ã¿¡´Â µ¹°è´ÜÀÌ Àß ¾È º¸¿©.",L"ÀÔ±¸ÀÇ ¹«³ÊÁø ±âµÕ¸¸ ÇÇÇÏ¸é µÅ. ¾ÈÂÊÀº ¾ÆÁ÷ °ÉÀ» ¸¸ÇØ.",L"¿¹¹è´ç ÂÊ¿¡¼­ ºÒºûÀ» ºÃ¾î. ³×°¡ ÄÑ µÎ°í ¿Â °Ç°¡?"},0},
-        {L"½£Áö±â ¼Ò¸®",{10,13},{.26f,.47f,.32f,1},{L"¿ÃÇØ´Â ¾È°³°¡ ³·°Ô ±ò¸®³×. ±æ °¡ÀåÀÚ¸®¸¸ º¸°í °É¾î.",L"ºÓÀº Ãµ ¿·¿¡ ´ŞºûÇ®ÀÌ ÀÖ¾î. »Ñ¸®±îÁö »ÌÁö´Â ¸»°í.",L"½£ÀÌ °©ÀÚ±â Á¶¿ëÇØÁ³¾î. ´Ã µè´ø ¼Ò¸®°¡ ÇÏ³ª ºüÁø °Í °°¾Æ."},0},
-        {L"Á¶»çÀÚ ÀÌº¥",{27.8f,11},{.46f,.40f,.34f,1},{L"¹¦ºñÀÎ ÁÙ ¾Ë¾Ò´Âµ¥ ¸¶À» »ç¶÷µé ÀÌ¸§ÀÌ »õ°ÜÁ® ÀÖ¾î. »ì¾Æ ÀÖ´Â »ç¶÷µé ¸»ÀÌ¾ß.",L"µ¹¿¡ ³­ ÀÚ±¹À» ºÁ. ¿À·¡µÈ »óÃ³ À§¿¡ »õ·Î ±ÜÀº ÈçÀûÀÌ ÀÖ¾î.",L"³» ¼öÃ¸¿¡µµ ºó ÁÙÀÌ »ı°å¾î. À×Å©°¡ ¹øÁø °Ç ¾Æ´Ñµ¥."},0},
-        {L"È£¼ı°¡ ³ëÀÎ °¡¶õ",{29,29},{.49f,.47f,.41f,1},{L"Àú³á Á¾ÀÌ ¿ï¸®¸é ¸ğµÎ ÁıÀ¸·Î µ¹¾Æ°¡Áö. ´Ã ÇÑ »ç¶÷¸¸ »©°í.",L"´©°¡ ³²¾Ò´ÂÁö´Â ¹¯Áö ¸»°Ô. ´ë´äÇÒ ¼ö ÀÖ´Â »ç¶÷ÀÌ ¾ø¾î.",L"¶Ç Àú³áÀÌ ¿Ô±¸¸Õ. ÀÚ³×´Â ÁıÀ¸·Î µ¹¾Æ°¡°Ô."},0}
+        {{12,17},{.27f,.34f,.43f,1}},{{24,15},{.46f,.26f,.24f,1}},{{15,12},{.35f,.37f,.39f,1}}};
+    people={
+        {L"ë§ˆë¼ ì´Œì¥",{17,16},{.47f,.35f,.54f,1},{L"ì™”êµ¬ë‚˜. ì €ë… ì¢…ì„ ìš¸ë ¤ì•¼ í•˜ëŠ”ë° ì•½ì´ˆê°€ ëª¨ìë¼ë„¤. ì ê¹ ë„ì™€ì£¼ê² ë‹ˆ?",L"ìˆ² ì…êµ¬, í˜¸ìˆ«ê°€, ì˜› ì˜ˆë°°ë‹¹ì— í•˜ë‚˜ì”© ìˆë‹¨ë‹¤. ì„¸ í¬ê¸°ë©´ ì¶©ë¶„í•´.",L"ìˆ˜ê³ í–ˆë‹¤. â€¦ì•„ë‹ˆ, ë°©ê¸ˆ ëˆ„êµ¬ì™€ í•¨ê»˜ ì˜¨ ê²ƒ ê°™ì•„ì„œ."},0},
+        {L"ì–´ë¶€ í† ë²¤",{23,19},{.23f,.46f,.54f,1},{L"ì˜¤ëŠ˜ì€ ë¹ˆ ê·¸ë¬¼ë§Œ ì„¸ ë²ˆ ê±´ì¡Œì–´. ë¬¼ê³ ê¸°ë“¤ë„ ì¢…ì†Œë¦¬ë¥¼ ê¸°ë‹¤ë¦¬ë‚˜ ë´.",L"í˜¸ìˆ«ê°€ ì–•ì€ ëŒë°­ì„ ì°¾ì•„ë´. í‘¸ë¥¸ ê½ƒì´ í•˜ë‚˜ ë³´ì¼ ê±°ì•¼.",L"ë¬¼ì´ ì ì í•´ì¡Œë„¤. ë‚´ì¼ì€ ë°°ë¥¼ ë„ìš¸ ìˆ˜ ìˆê² ì–´."},0},
+        {L"ë¹µì§‘ ì£¼ì¸ ì¼ì œ",{13,19},{.72f,.46f,.29f,1},{L"ë§‰ êµ¬ìš´ ë¹µ ëƒ„ìƒˆê°€ ë‚˜ì§€? ëŠ˜ í•˜ë‚˜ì”© ë‚¨ëŠ”ë°, ì˜¤ëŠ˜ë„ ì†ì´ ë¨¼ì € ì›€ì§ì˜€ë„¤.",L"ëŒì•„ì˜¤ëŠ” ê¸¸ì— ë“¤ëŸ¬. ë”°ëœ»í•œ ê±¸ë¡œ ë‚¨ê²¨ ë‘˜ê²Œ.",L"ë¹µ í•˜ë‚˜ë¥¼ ë”°ë¡œ ë’€ëŠ”ë°â€¦ ëˆ„êµ¬ ëª«ì´ì—ˆë”ë¼?"},0},
+        {L"ê²½ë¹„ë³‘ ë Œ",{19,15.5f},{.35f,.41f,.47f,1},{L"ë¶ìª½ ê¸¸ì€ ì—´ë ¤ ìˆì–´. ë¬´ë„ˆì§„ ëŒë‹´ì—ëŠ” ê°€ê¹Œì´ ê°€ì§€ ë§ˆ.",L"ì˜ˆë°°ë‹¹ì€ ë¶ìª½ ê°ˆë¦¼ê¸¸ì—ì„œ ë™ìª½ìœ¼ë¡œ. ê¸°ë‘¥ ì‚¬ì´ë¡œ ë“¤ì–´ê°€ë©´ ë¼.",L"ì¶œì… ì¥ë¶€ê°€ í•œ ì¥ ë¹„ì—ˆêµ°. ì•„ì¹¨ì—ëŠ” ë¶„ëª… ì ì–´ ë’€ëŠ”ë°."},0},
+        {L"ë‹ˆì•„",{18,21},{.77f,.43f,.49f,1},{L"ìš°ë¦¬ ì§‘ ì‹íƒì—ëŠ” ì˜ìê°€ í•˜ë‚˜ ë” ìˆì–´. ì•„ë¬´ë„ ê±°ê¸° ì•‰ìœ¼ë©´ ì•ˆ ëœëŒ€.",L"ì•½ì´ˆ ì°¾ëŠ” ê±°ì•¼? ë°˜ì§ì´ëŠ” ê½ƒì´ë©´ ë‚˜ë„ ë´¤ì–´!",L"ì—„ë§ˆê°€ ì˜ìëŠ” ì›ë˜ ì„¸ ê°œì˜€ëŒ€. ë‚´ê°€ ì˜ëª» ì…Œë‚˜?"},0},
+        {L"ì•½ì´ˆê¾¼ ì˜¤ë¦°",{11,18},{.31f,.53f,.35f,1},{L"í‘¸ë¥¸ ê½ƒìì— ì€ë¹› ì¤„ê¸°ê°€ ìˆìœ¼ë©´ ë‹¬ë¹›í’€ì´ì§€. ë‹¤ë¥¸ í’€ê³¼ í—·ê°ˆë¦¬ì§„ ì•Šì„ ê±°ì•¼.",L"ë¿Œë¦¬ëŠ” ë‚¨ê²¨ ë‘ë ´. ë‚´ë…„ì—ë„ ê½ƒì„ ë´ì•¼ í•˜ë‹ˆê¹Œ.",L"ì†ì„ ì”»ì–´ë„ í–¥ì´ ë‚¨ì„ ê±°ì•¼. í•˜ë£¨ì¯¤ ì§€ë‚˜ë©´ ê´œì°®ì•„."},0},
+        {L"ì§ì¡°ê³µ ì…€ë¼",{15,22},{.57f,.43f,.63f,1},{L"ì˜· ì•ˆìª½ì— ì´ë¦„ì„ ìˆ˜ë†“ëŠ” ì¤‘ì´ì•¼. ìƒì–´ë²„ë ¤ë„ ì£¼ì¸ì„ ì°¾ì„ ìˆ˜ ìˆê²Œ.",L"ìˆ² ì…êµ¬ì— ë‚´ê°€ ë¬¶ì–´ ë‘” ë¶‰ì€ ì²œì´ ìˆì–´. ê·¸ìª½ìœ¼ë¡œ ê°€ ë´.",L"ì´ ì˜·ì˜ ì£¼ì¸ì´ ëˆ„êµ¬ì˜€ì§€? ì´ë¦„ê¹Œì§€ ì§€ì›Œì¡Œë„¤."},0},
+        {L"ìˆœë¡€ì ì—ë‹¤",{21,20},{.66f,.59f,.34f,1},{L"í•˜ë£»ë°¤ ë¬µìœ¼ë ¤ë‹¤ ì‚¬í˜ì§¸ì•¼. ì´ ë§ˆì„, ì´ìƒí•˜ê²Œ ë°œê¸¸ì´ ì•ˆ ë–¨ì–´ì ¸.",L"ì˜› ì˜ˆë°°ë‹¹ì—ëŠ” ì´ë¦„ì„ ìƒˆê¸´ ëŒì´ ìˆì–´. ëˆ„ê°€ ëª¨ë‘ ê¸ì–´ ë†“ì•˜ë”êµ°.",L"ë‚´ì¼ì€ ë– ë‚˜ë ¤ê³ . ë‚´ê°€ ì–´ë””ì„œ ì™”ëŠ”ì§€ ì•„ì§ ê¸°ì–µí•  ë•Œ."},0},
+        {L"ë°©ì•—ê°„ì§€ê¸° ëˆ",{19,24},{.48f,.43f,.34f,1},{L"ë°€ê°€ë£¨ ë°°ë‹¬ì´ í•˜ë‚˜ ë‚¨ì•˜ì–´. ì£¼ì†Œê°€ ì—†ì–´ì„œ ì¢…ì¼ ë“¤ê³  ë‹¤ë‹ˆë„¤.",L"ê´‘ì¥ìœ¼ë¡œ ëŒì•„ì˜¤ë©´ ì¢…ë¶€í„° ì°¾ì•„. í•´ê°€ ê¸ˆë°© ë„˜ì–´ê°ˆ ê±°ì•¼.",L"ë°°ë‹¬ì€ ë‹¤ ëë‚¬ì–´. ë¹ˆ ìë£¨ë¥¼ ì™œ ë“¤ê³  ìˆì—ˆëŠ”ì§€ ëª¨ë¥´ê² êµ°."},0},
+        {L"ë„ì˜ˆê°€ ì£¼ë¦¬",{13,15.8f},{.61f,.34f,.27f,1},{L"í˜¸ìˆ˜ ì§„í™ìœ¼ë¡œ ë¹šìœ¼ë©´ ìœ ì•½ì´ í‘¸ë¥´ê²Œ ë‚˜ì™€. ë‹¤ë¥¸ ê³³ í™ìœ¼ë¡œëŠ” ì•ˆ ë¼.",L"ì˜› ì˜ˆë°°ë‹¹ ë°”ë‹¥ë„ ê°™ì€ í™ìœ¼ë¡œ êµ¬ì› ëŒ€. ì§€ê¸ˆì€ ì´ë¼íˆ¬ì„±ì´ì§€ë§Œ.",L"ê°€ë§ˆ ì† ê·¸ë¦‡ì´ í•˜ë‚˜ ê¹¨ì¡Œì–´. ì¢…ì´ ìš¸ë¦´ ë•Œì˜€ë‚˜."},0},
+        {L"ë§ˆêµ¬ê°„ì§€ê¸° ì¹´ë°",{23,16.5f},{.39f,.46f,.34f,1},{L"ë§ë“¤ì´ ë¶ìª½ ê¸¸ë§Œ ë³´ë©´ ë©ˆì¶° ì„œ. ì˜ˆì „ì—ëŠ” ì˜ ë‹¤ë…”ëŠ”ë°.",L"ëŒì•„ì˜¬ ë• ê´‘ì¥ ìª½ìœ¼ë¡œ ì™€. ìˆ² ì•ˆìª½ì€ ê¸¸ì´ ëŠê²¼ì–´.",L"ë§ë“¤ì´ ì´ì œ ì¡°ìš©í•˜ë„¤. ì˜¤ëŠ˜ì€ í‘¹ ìê² ì–´."},0},
+        {L"ì •ì›ì‚¬ ë¯¸ë¼",{16,25.5f},{.43f,.57f,.35f,1},{L"ëˆ„ê°€ í™”ë‹¨ì— ë°œìêµ­ì„ ë‚¨ê²¼ì–´. ì•„ì´ë“¤í•œí…Œ ë¬¼ì–´ë„ ì•„ë‹ˆë˜.",L"ë‹¬ë¹›í’€ì€ ë°Ÿì•„ë„ ë‹¤ì‹œ ì¼ì–´ë‚˜ë”ë¼. ê·¸ë˜ë„ ì¡°ì‹¬íˆ ë‹¤ë¤„ ì¤˜.",L"ë°œìêµ­ì´ ì—†ì–´ì¡Œë„¤. ë¹„ë„ ì•ˆ ì™”ëŠ”ë°."},0},
+        {L"ë‚˜ë£»ë°°ê¾¼ ë³´ë¼",{21,24},{.25f,.43f,.51f,1},{L"ë‚˜ë£¨ëŠ” ë¬¸ ë‹«ì•˜ì–´. ëŒì•„ì˜¤ëŠ” ë°°ê°€ ì—†ì–´ì„œ ë§ì´ì•¼.",L"í˜¸ìˆ˜ëŠ” ëŒì•„ì„œ ê°€. ì–•ì•„ ë³´ì—¬ë„ ë°”ë‹¥ì´ ê°‘ìê¸° êº¼ì ¸.",L"ë°°ë¥¼ ê¸°ë‹¤ë ¸ë‹¤ê³ ? ë‚˜ëŠ” ì˜¤ëŠ˜ í•˜ë£¨ ì¢…ì¼ ê·¸ë¬¼ì„ ì†ë´¤ëŠ”ë°."},0},
+        {L"ì´ì•¼ê¸°ê¾¼ ìœ ë‚˜",{16.7f,20.5f},{.64f,.32f,.36f,1},{L"ì˜›ë‚ ì—ëŠ” ì € ì¢…ì„ ë‘ ì‚¬ëŒì´ í•¨ê»˜ ìš¸ë ¸ëŒ€. í˜¼ìì„œëŠ” ë„ˆë¬´ ë¬´ê±°ì› ê±°ë“ .",L"ì–´ëŠ ë‚ ë¶€í„° í˜¼ì ìš¸ë¦´ ìˆ˜ ìˆê²Œ ëì§€. ê·¸ ë’¤ ì´ì•¼ê¸°ëŠ” ì•„ë¬´ë„ ëª°ë¼.",L"ì¢…ì€ ì›ë˜ í•œ ì‚¬ëŒì´ ìš¸ë¦¬ëŠ” ê±°ì•¼. ë‚´ê°€ ë‹¤ë¥¸ ë§ì„ í–ˆë‹ˆ?"},0},
+        {L"ë¶ë¬¸ì§€ê¸° í•˜ë„¤",{18,11.5f},{.35f,.42f,.44f,1},{L"ì˜ˆë°°ë‹¹ì— ê°„ë‹¤ë©´ ë‚®ì— ë‹¤ë…€ì™€. ë°¤ì—ëŠ” ëŒê³„ë‹¨ì´ ì˜ ì•ˆ ë³´ì—¬.",L"ì…êµ¬ì˜ ë¬´ë„ˆì§„ ê¸°ë‘¥ë§Œ í”¼í•˜ë©´ ë¼. ì•ˆìª½ì€ ì•„ì§ ê±¸ì„ ë§Œí•´.",L"ì˜ˆë°°ë‹¹ ìª½ì—ì„œ ë¶ˆë¹›ì„ ë´¤ì–´. ë„¤ê°€ ì¼œ ë‘ê³  ì˜¨ ê±´ê°€?"},0},
+        {L"ìˆ²ì§€ê¸° ì†Œë¦¬",{10,13},{.26f,.47f,.32f,1},{L"ì˜¬í•´ëŠ” ì•ˆê°œê°€ ë‚®ê²Œ ê¹”ë¦¬ë„¤. ê¸¸ ê°€ì¥ìë¦¬ë§Œ ë³´ê³  ê±¸ì–´.",L"ë¶‰ì€ ì²œ ì˜†ì— ë‹¬ë¹›í’€ì´ ìˆì–´. ë¿Œë¦¬ê¹Œì§€ ë½‘ì§€ëŠ” ë§ê³ .",L"ìˆ²ì´ ê°‘ìê¸° ì¡°ìš©í•´ì¡Œì–´. ëŠ˜ ë“£ë˜ ì†Œë¦¬ê°€ í•˜ë‚˜ ë¹ ì§„ ê²ƒ ê°™ì•„."},0},
+        {L"ì¡°ì‚¬ì ì´ë²¤",{27.8f,11},{.46f,.40f,.34f,1},{L"ë¬˜ë¹„ì¸ ì¤„ ì•Œì•˜ëŠ”ë° ë§ˆì„ ì‚¬ëŒë“¤ ì´ë¦„ì´ ìƒˆê²¨ì ¸ ìˆì–´. ì‚´ì•„ ìˆëŠ” ì‚¬ëŒë“¤ ë§ì´ì•¼.",L"ëŒì— ë‚œ ìêµ­ì„ ë´. ì˜¤ë˜ëœ ìƒì²˜ ìœ„ì— ìƒˆë¡œ ê¸ì€ í”ì ì´ ìˆì–´.",L"ë‚´ ìˆ˜ì²©ì—ë„ ë¹ˆ ì¤„ì´ ìƒê²¼ì–´. ì‰í¬ê°€ ë²ˆì§„ ê±´ ì•„ë‹Œë°."},0},
+        {L"í˜¸ìˆ«ê°€ ë…¸ì¸ ê°€ë€",{29,29},{.49f,.47f,.41f,1},{L"ì €ë… ì¢…ì´ ìš¸ë¦¬ë©´ ëª¨ë‘ ì§‘ìœ¼ë¡œ ëŒì•„ê°€ì§€. ëŠ˜ í•œ ì‚¬ëŒë§Œ ë¹¼ê³ .",L"ëˆ„ê°€ ë‚¨ì•˜ëŠ”ì§€ëŠ” ë¬»ì§€ ë§ê²Œ. ëŒ€ë‹µí•  ìˆ˜ ìˆëŠ” ì‚¬ëŒì´ ì—†ì–´.",L"ë˜ ì €ë…ì´ ì™”êµ¬ë¨¼. ìë„¤ëŠ” ì§‘ìœ¼ë¡œ ëŒì•„ê°€ê²Œ."},0}
     };
-    herbs = { {{10.8f,12.2f},false},{{23,20.2f},false},{{26,9},false} };
-    pillars = { {{24.7f,8.5f},65},{{27.3f,8.5f},49},{{24.7f,10.5f},36},{{27.3f,10.5f},58},{{26,7.6f},18} };
+    herbs={{{10.8f,12.2f},false},{{23,20.2f},false},{{26,9},false}};
+    pillars={{{24.7f,8.5f},65},{{27.3f,8.5f},49},{{24.7f,10.5f},36},{{27.3f,10.5f},58},{{26,7.6f},18}};
     trees.clear();
-    for (int x = 2; x < 35; x += 2) for (int y = 2; y < 35; y += 2) {
-        V p = { x + .35f * std::sin(float(y * 7)),y + .35f * std::cos(float(x * 5)) };
-        if ((x < 12 || y < 7 || x>31 || y>31) && !road(p) && !lake(p) && !ruin(p)) {
-            bool clear = true;
-            for (const auto& h : herbs) if (dist(p, h.p) < 1.3f) clear = false;
-            for (const auto& n : people) if (dist(p, n.p) < 1.3f) clear = false;
-            if (clear) trees.push_back({ p,.85f + float((x + y) % 5) * .1f });
+    for(int x=2;x<35;x+=2) for(int y=2;y<35;y+=2) {
+        V p={x+.35f*std::sin(float(y*7)),y+.35f*std::cos(float(x*5))};
+        if((x<12||y<7||x>31||y>31)&&!road(p)&&!lake(p)&&!ruin(p)) {
+            bool clear=true;
+            for(const auto& h:herbs) if(dist(p,h.p)<1.3f) clear=false;
+            for(const auto& n:people) if(dist(p,n.p)<1.3f) clear=false;
+            if(clear) trees.push_back({p,.85f+float((x+y)%5)*.1f});
         }
     }
-    camera = iso(player); camera.y -= 20;
-    say(L"¸¶¶ó ÃÌÀåÀÌ ±¤Àå¿¡¼­ ±â´Ù¸®°í ÀÖ½À´Ï´Ù.");
+    camera=iso(player); camera.y-=20;
+    say(L"ë§ˆë¼ ì´Œì¥ì´ ê´‘ì¥ì—ì„œ ê¸°ë‹¤ë¦¬ê³  ìˆìŠµë‹ˆë‹¤.");
 }
 int nearPerson() {
-    int best = -1; float d = 1.2f;
-    for (int i = 0; i < (int)people.size(); ++i) if (dist(player, people[i].p) < d) { d = dist(player, people[i].p); best = i; }
+    int best=-1; float d=1.2f;
+    for(int i=0;i<(int)people.size();++i) if(dist(player,people[i].p)<d) {d=dist(player,people[i].p);best=i;}
     return best;
 }
-int nearHerb() { for (int i = 0; i < (int)herbs.size(); ++i) if (!herbs[i].picked && dist(player, herbs[i].p) < 1.1f) return i; return -1; }
+int nearHerb() { for(int i=0;i<(int)herbs.size();++i) if(!herbs[i].picked&&dist(player,herbs[i].p)<1.1f) return i; return -1; }
 void interact() {
-    int h = nearHerb(), n = nearPerson();
-    if (stage == 1 && h >= 0) { herbs[h].picked = true; ++collected; if (collected == 3) stage = 2; say(collected == 3 ? L"¼¼ Æ÷±â¸¦ ¸ğµÎ ¸ğ¾Ò½À´Ï´Ù. ±¤ÀåÀÇ Á¾À¸·Î µ¹¾Æ°¡¼¼¿ä." : L"´ŞºûÇ®À» Á¶½É½º·´°Ô ²ª¾ú½À´Ï´Ù. ¼Õ¿¡ Ç® Çâ±â°¡ ³²½À´Ï´Ù."); }
-    else if (stage == 2 && dist(player, Bell) < 1.2f) { stage = 3; say(L"Á¾ÀÌ ÇÑ ¹ø ¿ï·È´Ù. Àá½Ã µÚ, ´©±º°¡ÀÇ ÀÌ¸§ÀÌ ¶°¿À¸£Áö ¾Ê¾Ò´Ù."); }
-    else if (n >= 0) {
-        Person& p = people[n];
-        int line = stage == 3 ? 2 : (stage == 0 ? 0 : 1);
-        if (p.talks++ % 2 && stage != 3) line = 1 - line;
-        say(std::wstring(p.name) + L"\n" + p.lines[line]);
-        if (n == 0 && stage == 0) stage = 1;
-    }
-    else if (dist(player, Ruin) < 2) say(L"ÀÌ¸§ÀÌ Áö¿öÁø ±â³äºñ\nµ¹À» ±Ü¾î³½ ÀÚ¸®°¡ À¯³­È÷ Èñ´Ù. ¾ÆÁ÷ µ¹°¡·ç°¡ ³²¾Æ ÀÖ´Ù.");
-    else if (dist(player, Bell) < 1.2f) say(L"Á¾ ¾Æ·¡¿¡ ¾àÃÊ¸¦ ³õ¾Ò´ø ÀÚ±¹ÀÌ ³²¾Æ ÀÖ´Ù. ¸Å³â °°Àº ÀÚ¸®¿¡ ³õÀº µíÇÏ´Ù.");
+    int h=nearHerb(), n=nearPerson();
+    if(stage==1&&h>=0) {herbs[h].picked=true; ++collected; if(collected==3) stage=2; say(collected==3?L"ì„¸ í¬ê¸°ë¥¼ ëª¨ë‘ ëª¨ì•˜ìŠµë‹ˆë‹¤. ê´‘ì¥ì˜ ì¢…ìœ¼ë¡œ ëŒì•„ê°€ì„¸ìš”.":L"ë‹¬ë¹›í’€ì„ ì¡°ì‹¬ìŠ¤ëŸ½ê²Œ êº¾ì—ˆìŠµë‹ˆë‹¤. ì†ì— í’€ í–¥ê¸°ê°€ ë‚¨ìŠµë‹ˆë‹¤.");}
+    else if(stage==2&&dist(player,Bell)<1.2f) {stage=3;say(L"ì¢…ì´ í•œ ë²ˆ ìš¸ë ¸ë‹¤. ì ì‹œ ë’¤, ëˆ„êµ°ê°€ì˜ ì´ë¦„ì´ ë– ì˜¤ë¥´ì§€ ì•Šì•˜ë‹¤.");}
+    else if(n>=0) {
+        Person& p=people[n];
+        int line=stage==3?2:(stage==0?0:1);
+        if(p.talks++%2&&stage!=3) line=1-line;
+        say(std::wstring(p.name)+L"\n"+p.lines[line]);
+        if(n==0&&stage==0) stage=1;
+    } else if(dist(player,Ruin)<2) say(L"ì´ë¦„ì´ ì§€ì›Œì§„ ê¸°ë…ë¹„\nëŒì„ ê¸ì–´ë‚¸ ìë¦¬ê°€ ìœ ë‚œíˆ í¬ë‹¤. ì•„ì§ ëŒê°€ë£¨ê°€ ë‚¨ì•„ ìˆë‹¤.");
+    else if(dist(player,Bell)<1.2f) say(L"ì¢… ì•„ë˜ì— ì•½ì´ˆë¥¼ ë†“ì•˜ë˜ ìêµ­ì´ ë‚¨ì•„ ìˆë‹¤. ë§¤ë…„ ê°™ì€ ìë¦¬ì— ë†“ì€ ë“¯í•˜ë‹¤.");
 }
-void shadow(V p, float radius, float tall) {
-    V s = screen(p);
-    for (int i = 7; i >= 1; --i) ellipse(s.x + tall * .26f, s.y - tall * .12f, radius + i * 1.7f, radius * .32f + i * .7f, { .025f,.035f,.04f,.035f });
-    ellipse(s.x, s.y, radius * .65f, radius * .22f, { .025f,.035f,.04f,.20f });
+void shadow(V p,float radius,float tall) {
+    V s=screen(p);
+    renderer->DrawShadow(s.x,s.y,radius,tall*.65f);
 }
-void box(V p, float w, float d, float h, C c) {
-    V s = screen(p);
+void box(V p,float w,float d,float h,C c) {
+    V s=screen(p);
     renderer->SetMaterial(1);
-    renderer->DrawSolidQuad(s.x - w / 2, s.y, s.x, s.y - d / 2, s.x, s.y - d / 2 + h, s.x - w / 2, s.y + h, c.r * .72f, c.g * .72f, c.b * .72f, c.a);
-    renderer->DrawSolidQuad(s.x, s.y - d / 2, s.x + w / 2, s.y, s.x + w / 2, s.y + h, s.x, s.y - d / 2 + h, c.r, c.g, c.b, c.a);
-    diamond({ s.x,s.y + h }, w, d, shade(c, 1.1f));
+    renderer->DrawSolidQuad(s.x-w/2,s.y,s.x,s.y-d/2,s.x,s.y-d/2+h,s.x-w/2,s.y+h,c.r*.72f,c.g*.72f,c.b*.72f,c.a);
+    renderer->DrawSolidQuad(s.x,s.y-d/2,s.x+w/2,s.y,s.x+w/2,s.y+h,s.x,s.y-d/2+h,c.r,c.g,c.b,c.a);
+    diamond({s.x,s.y+h},w,d,shade(c,1.1f));
     renderer->SetMaterial(0);
 }
 void ground() {
-    for (int x = 0; x < MapSize; ++x) for (int y = 0; y < MapSize; ++y) {
-        V p = { x + .5f,y + .5f }; if (!visible(p, 90)) continue;
-        C c = road(p) ? C{ .52f,.49f,.39f,1 } : (ruin(p) ? C{ .43f,.46f,.41f,1 } : C{ .26f,.43f,.29f,1 });
-        if (x < 12 || y < 7) if (!road(p)) c = { .18f,.33f,.24f,1 };
-        renderer->SetMaterial(road(p) || ruin(p) ? 1 : 2);
-        diamond(screen(p), 84.5f, 42.5f, c);
+    for(int x=0;x<MapSize;++x) for(int y=0;y<MapSize;++y) {
+        V p={x+.5f,y+.5f}; if(!visible(p,90)) continue;
+        C c=ruin(p)?C{.43f,.46f,.41f,1}:C{.26f,.43f,.29f,1};
+        if(x<12||y<7) c={.18f,.33f,.24f,1};
+        renderer->SetMaterial(ruin(p)?1:2);
+        diamond(screen(p),84.5f,42.5f,c);
+    }
+    // Continuous Bezier ribbons share edges; the wider layers soften soil into grass.
+    renderer->SetMaterial(5);
+    for(int layer=3;layer>=0;--layer) {
+        float halfWidth=.55f+layer*.09f;
+        C soil={.48f,.42f,.31f,layer==0?1.f:.20f};
+        for(const auto& c:paths) for(int i=0;i<64;++i) {
+            float t=i/64.f, u=(i+1)/64.f;
+            V a=curvePoint(c,t),b=curvePoint(c,u);
+            V before=curvePoint(c,std::max(0.f,t-.005f)),after=curvePoint(c,std::min(1.f,t+.005f));
+            V nextBefore=curvePoint(c,std::max(0.f,u-.005f)),nextAfter=curvePoint(c,std::min(1.f,u+.005f));
+            float len=std::max(.001f,dist(before,after)),nextLen=std::max(.001f,dist(nextBefore,nextAfter));
+            V n={-(after.y-before.y)/len*halfWidth,(after.x-before.x)/len*halfWidth};
+            V m={-(nextAfter.y-nextBefore.y)/nextLen*halfWidth,(nextAfter.x-nextBefore.x)/nextLen*halfWidth};
+            if(!visible(a,100)) continue;
+            V q0=screen({a.x+n.x,a.y+n.y}),q1=screen({a.x-n.x,a.y-n.y});
+            V q2=screen({b.x-m.x,b.y-m.y}),q3=screen({b.x+m.x,b.y+m.y});
+            renderer->DrawSolidQuad(q0.x,q0.y,q1.x,q1.y,q2.x,q2.y,q3.x,q3.y,soil.r,soil.g,soil.b,soil.a);
+        }
+        for(int i=0;i<96;++i) {
+            float a=i*6.2831853f/96,b=(i+1)*6.2831853f/96,r=2.15f+layer*.08f;
+            tri(screen({18,18}),screen({18+r*std::cos(a),18+r*std::sin(a)}),screen({18+r*std::cos(b),18+r*std::sin(b)}),soil);
+        }
     }
     renderer->SetMaterial(0);
     // A continuous projected shoreline avoids a staircase of water tiles.
-    const int segments = 128;
-    V center = screen(Lake);
-    for (int i = 0; i < segments; ++i) {
-        float a = i * 6.2831853f / segments, b = (i + 1) * 6.2831853f / segments;
-        V pa = screen({ Lake.x + 6.05f * std::cos(a),Lake.y + 4.75f * std::sin(a) });
-        V pb = screen({ Lake.x + 6.05f * std::cos(b),Lake.y + 4.75f * std::sin(b) });
-        tri(center, pa, pb, { .47f,.53f,.43f,1 });
+    const int segments=128;
+    V center=screen(Lake);
+    for(int i=0;i<segments;++i) {
+        float a=i*6.2831853f/segments,b=(i+1)*6.2831853f/segments;
+        V pa=screen({Lake.x+6.05f*std::cos(a),Lake.y+4.75f*std::sin(a)});
+        V pb=screen({Lake.x+6.05f*std::cos(b),Lake.y+4.75f*std::sin(b)});
+        tri(center,pa,pb,{.47f,.53f,.43f,1});
     }
     renderer->SetMaterial(3);
-    for (int i = 0; i < segments; ++i) {
-        float a = i * 6.2831853f / segments, b = (i + 1) * 6.2831853f / segments;
-        tri(center, screen({ Lake.x + 5.8f * std::cos(a),Lake.y + 4.5f * std::sin(a) }), screen({ Lake.x + 5.8f * std::cos(b),Lake.y + 4.5f * std::sin(b) }), { .16f,.44f,.51f,1 });
+    for(int i=0;i<segments;++i) {
+        float a=i*6.2831853f/segments,b=(i+1)*6.2831853f/segments;
+        tri(center,screen({Lake.x+5.8f*std::cos(a),Lake.y+4.5f*std::sin(a)}),screen({Lake.x+5.8f*std::cos(b),Lake.y+4.5f*std::sin(b)}),{.16f,.44f,.51f,1});
     }
     renderer->SetMaterial(0);
-    for (const auto& b : buildings) if (visible(b.p)) shadow(b.p, 47, 70);
-    for (const auto& t : trees) if (visible(t.p)) shadow(t.p, 25 * t.size, 85 * t.size);
-    for (const auto& p : pillars) if (visible(p.p)) shadow(p.p, 17, p.height);
-    for (const auto& n : people) if (visible(n.p)) shadow(n.p, 12, 30);
-    shadow(player, 13, 35); shadow(Bell, 24, 60); shadow(Well, 21, 20);
+    for(const auto& b:buildings) if(visible(b.p)) shadow(b.p,47,70);
+    for(const auto& t:trees) if(visible(t.p)) shadow(t.p,25*t.size,85*t.size);
+    for(const auto& p:pillars) if(visible(p.p)) shadow(p.p,17,p.height);
+    for(const auto& n:people) if(visible(n.p)) shadow(n.p,12,30);
+    shadow(player,13,35); shadow(Bell,24,60); shadow(Well,21,20);
 }
 void house(const Building& b) {
-    V s = screen(b.p); box(b.p, 94, 47, 64, { .65f,.65f,.57f,1 });
+    V s=screen(b.p);
+    box(b.p,94,47,64,{.69f,.70f,.64f,1});
+    // Gables and two distinct roof slopes share the wall footprint.
+    renderer->SetMaterial(1);
+    tri({s.x,s.y+40},{s.x+55,s.y+68},{s.x+27.5f,s.y+104},{.65f,.66f,.59f,1});
     renderer->SetMaterial(4);
-    tri({ s.x - 57,s.y + 59 }, { s.x,s.y + 108 }, { s.x + 57,s.y + 59 }, b.roof);
-    tri({ s.x - 57,s.y + 59 }, { s.x,s.y + 35 }, { s.x + 57,s.y + 59 }, shade(b.roof, .7f));
+    renderer->DrawSolidQuad(s.x-55,s.y+68,s.x,s.y+40,s.x+27.5f,s.y+104,s.x-27.5f,s.y+132,
+        b.roof.r*.80f,b.roof.g*.80f,b.roof.b*.80f,1);
+    renderer->DrawSolidQuad(s.x-27.5f,s.y+132,s.x+27.5f,s.y+104,s.x+55,s.y+68,s.x,s.y+96,
+        b.roof.r*1.18f,b.roof.g*1.18f,b.roof.b*1.18f,1);
     renderer->SetMaterial(0);
-    rect(s.x, s.y + 15, 20, 34, { .23f,.22f,.19f,1 });
-    for (int side = -1; side <= 1; side += 2) {
-        rect(s.x + side * 31, s.y + 28, 18, 24, { .25f,.28f,.27f,1 });
-        rect(s.x + side * 31, s.y + 29, 12, 17, { .91f,.76f,.43f,1 });
-        rect(s.x + side * 31, s.y + 29, 2, 18, { .31f,.28f,.23f,1 });
+    auto beam=[&](V a,V d,float thickness,C c) {
+        float len=std::max(.01f,dist(a,d));
+        V n={-(d.y-a.y)*thickness/len,(d.x-a.x)*thickness/len};
+        renderer->DrawSolidQuad(a.x+n.x,a.y+n.y,d.x+n.x,d.y+n.y,d.x-n.x,d.y-n.y,a.x-n.x,a.y-n.y,c.r,c.g,c.b,c.a);
+    };
+    C timber={.27f,.29f,.25f,1};
+    beam({s.x-48,s.y},{s.x-48,s.y+63},2,timber);
+    beam({s.x,s.y-23},{s.x,s.y+40},2.5f,timber);
+    beam({s.x+47,s.y},{s.x+47,s.y+62},2,timber);
+    beam({s.x,s.y+12},{s.x+47,s.y+35},1.6f,timber);
+    beam({s.x-47,s.y+29},{s.x,s.y+6},1.6f,timber);
+    beam({s.x-27.5f,s.y+132},{s.x+27.5f,s.y+104},2.5f,shade(b.roof,1.28f));
+    beam({s.x,s.y+40},{s.x+27.5f,s.y+104},2,timber);
+    beam({s.x+27.5f,s.y+104},{s.x+55,s.y+68},2,timber);
+    // Recessed openings follow the slant of their respective walls.
+    renderer->DrawSolidQuad(s.x+9,s.y-19,s.x+25,s.y-11,s.x+25,s.y+24,s.x+9,s.y+16,.20f,.23f,.21f,1);
+    for(int i=0;i<3;++i) beam({s.x+12+i*5.f,s.y-15+i*2.5f},{s.x+12+i*5.f,s.y+15+i*2.5f},.5f,{.40f,.38f,.29f,1});
+    ellipse(s.x+22,s.y+4,1.4f,1.4f,{.86f,.70f,.34f,1});
+    renderer->DrawSolidQuad(s.x-38,s.y+14,s.x-15,s.y+3,s.x-15,s.y+27,s.x-38,s.y+38,.20f,.26f,.27f,1);
+    renderer->DrawSolidQuad(s.x-34,s.y+16,s.x-19,s.y+9,s.x-19,s.y+25,s.x-34,s.y+32,.83f,.73f,.48f,1);
+    beam({s.x-26,s.y+12},{s.x-26,s.y+29},1,timber);
+    beam({s.x-34,s.y+24},{s.x-19,s.y+17},1,timber);
+    for(int i=0;i<3;++i) {
+        ellipse(s.x-35+i*8,s.y+10-i*3,4,4,{.33f,.48f,.32f,1});
+        ellipse(s.x-35+i*8,s.y+13-i*3,2.5f,2.5f,{.77f,.45f,.53f,1});
     }
-    for (int i = -1; i <= 1; ++i) rect(s.x + i * 44, s.y + 29, 4, 49, { .30f,.28f,.23f,1 });
-    rect(s.x + 30, s.y + 88, 11, 24, { .40f,.41f,.38f,1 });
-    for (int i = 0; i < 5; ++i) { float t = std::fmod(timeNow * .22f + i * .2f, 1.f); ellipse(s.x + 30 + t * 20, s.y + 104 + t * 48, 5 + t * 12, 5 + t * 8, { .83f,.86f,.84f,(1 - t) * .10f }); }
+    rect(s.x-10,s.y+111,12,30,{.49f,.51f,.47f,1});
+    rect(s.x-10,s.y+128,17,4,{.60f,.62f,.56f,1});
+    for(int i=0;i<5;++i) {
+        float t=std::fmod(timeNow*.15f+i*.2f,1.f);
+        ellipse(s.x-10+t*26,s.y+133+t*45,4+t*12,5+t*9,{.83f,.86f,.84f,(1-t)*.07f});
+    }
 }
 void tree(const Tree& t) {
-    V s = screen(t.p); float z = t.size;
-    rect(s.x, s.y + 22 * z, 9 * z, 46 * z, { .30f,.26f,.20f,1 });
-    float sway = std::sin(timeNow * 1.3f + t.p.x) * 1.8f;
-    for (int i = 0; i < 7; ++i) {
-        float a = i * 2.399f;
-        ellipse(s.x + std::cos(a) * 18 * z + sway, s.y + (63 + std::sin(a) * 17) * z, (24 - i % 3 * 2) * z, 24 * z, { .16f + i * .013f,.36f + i * .017f,.24f + i * .007f,1 });
+    V s=screen(t.p); float z=t.size;
+    rect(s.x,s.y+22*z,9*z,46*z,{.30f,.26f,.20f,1});
+    float sway=std::sin(timeNow*1.3f+t.p.x)*1.8f;
+    for(int i=0;i<7;++i) {
+        float a=i*2.399f;
+        ellipse(s.x+std::cos(a)*18*z+sway,s.y+(63+std::sin(a)*17)*z,(24-i%3*2)*z,24*z,{.16f+i*.013f,.36f+i*.017f,.24f+i*.007f,1});
     }
-    if (t.p.x < 12 && t.p.y>10 && t.p.y < 14) rect(s.x, s.y + 25, 13, 4, { .75f,.22f,.25f,1 });
+    if(t.p.x<12&&t.p.y>10&&t.p.y<14) rect(s.x,s.y+25,13,4,{.75f,.22f,.25f,1});
 }
-void character(V p, C coat, int id, bool hero = false) {
-    V s = screen(p); float scale = id == 4 ? .8f : 1.f;
-    float bob = hero && moving ? std::abs(std::sin(walk)) * 1.7f : std::sin(timeNow * 2 + id) * .7f;
-    float step = hero && moving ? std::sin(walk) * 4 : 0;
-    s.y += bob;
-    C skin = { .77f - id % 3 * .035f,.60f - id % 3 * .025f,.47f - id % 3 * .02f,1 };
-    for (int side = -1; side <= 1; side += 2) {
-        ellipse(s.x + side * 5, s.y + 10 + side * step, 3.5f, 10, { .24f,.25f,.26f,1 });
-        ellipse(s.x + side * 5, s.y + 2 + side * step, 5, 3, { .16f,.16f,.16f,1 });
+void character(V p,C coat,int id,bool hero=false) {
+    V s=screen(p);
+    float scale=id==4?.78f:(id%5==0?1.04f:1.f);
+    float cycle=hero&&moving?std::sin(walk):0;
+    float breath=hero&&moving?std::abs(cycle)*1.1f:std::sin(timeNow*2+id)*.55f;
+    auto point=[&](float x,float y)->V {return {s.x+x*scale,s.y+y*scale};};
+    auto oval=[&](float x,float y,float rx,float ry,C c) {
+        V v=point(x,y);ellipse(v.x,v.y,rx*scale,ry*scale,c);
+    };
+    auto limb=[&](V a,V b,float radius,C c) {
+        float len=std::max(.01f,dist(a,b));
+        V n={-(b.y-a.y)*radius/len,(b.x-a.x)*radius/len};
+        renderer->DrawSolidQuad(a.x+n.x,a.y+n.y,b.x+n.x,b.y+n.y,b.x-n.x,b.y-n.y,a.x-n.x,a.y-n.y,c.r,c.g,c.b,c.a);
+        ellipse(a.x,a.y,radius,radius,c);ellipse(b.x,b.y,radius,radius,c);
+    };
+    C skin={.78f-id%3*.04f,.62f-id%3*.025f,.49f-id%3*.02f,1};
+    C leather={.27f,.25f,.22f,1},hair={.25f+id%4*.045f,.22f+id%3*.03f,.19f,1};
+    for(int side=-1;side<=1;side+=2) {
+        float step=side*cycle*3.8f;
+        limb(point(side*4,23),point(side*4+step*.25f,13+step),2.9f*scale,{.32f,.34f,.34f,1});
+        limb(point(side*4+step*.25f,13+step),point(side*4-step*.35f,4+step*.3f),2.5f*scale,leather);
+        oval(side*4-step*.35f+1,3+step*.3f,4.2f,2.5f,leather);
     }
-    ellipse(s.x, s.y + 27 * scale, 11, 17 * scale, shade(coat, .72f));
-    ellipse(s.x - 2, s.y + 29 * scale, 8, 14 * scale, coat);
-    rect(s.x, s.y + 23 * scale, 19, 3, { .40f,.31f,.20f,1 });
-    for (int side = -1; side <= 1; side += 2) {
-        ellipse(s.x + side * 12, s.y + 29 * scale - side * step * .3f, 4, 10, coat);
-        ellipse(s.x + side * 12, s.y + 20 * scale - side * step * .3f, 3, 4, skin);
+    // Tapered coat silhouette and lit folds, rather than a stack of circular body parts.
+    renderer->DrawSolidQuad(s.x-7*scale,s.y+(42+breath)*scale,s.x+7*scale,s.y+(42+breath)*scale,
+        s.x+10*scale,s.y+20*scale,s.x-9*scale,s.y+20*scale,coat.r,coat.g,coat.b,1);
+    tri(point(-7,41+breath),point(-9,20),point(-2,20),shade(coat,.72f));
+    tri(point(1,40+breath),point(3,21),point(7,22),shade(coat,1.14f));
+    for(int side=-1;side<=1;side+=2) {
+        float swing=-side*cycle*3;
+        V shoulder=point(side*8,40+breath),elbow=point(side*11,32+swing),hand=point(side*10,25+swing);
+        limb(shoulder,elbow,3.2f*scale,shade(coat,side<0?.78f:1.05f));
+        limb(elbow,hand,2.5f*scale,coat);
+        oval(side*10,24+swing,2.5f,3.2f,skin);
     }
-    ellipse(s.x, s.y + 48 * scale, 9, 11, { .24f,.21f,.20f,1 });
-    ellipse(s.x + 1, s.y + 46 * scale, 7.3f, 8.5f, skin);
-    ellipse(s.x - 2, s.y + 53 * scale, 8, 5, { .30f + id % 3 * .07f,.24f,.20f,1 });
-    float gaze = hero ? facing.x * 1.5f : 1;
-    if (!hero || facing.y <= 0) for (int side = -1; side <= 1; side += 2) ellipse(s.x + gaze + side * 2.5f, s.y + 47 * scale, 1, 1.3f, { .13f,.15f,.16f,1 });
-    if (id % 3 == 0) { ellipse(s.x, s.y + 55 * scale, 12, 3, shade(coat, .85f)); ellipse(s.x, s.y + 59 * scale, 8, 5, coat); }
-    if (id % 3 == 1) rect(s.x + 15, s.y + 22, 3, 37, { .43f,.34f,.22f,1 });
-    if (hero) { rect(s.x - 8, s.y + 32, 4, 20, { .77f,.66f,.37f,1 }); ellipse(s.x + 8, s.y + 22, 5, 6, { .44f,.30f,.20f,1 }); }
+    limb(point(-8,27),point(8,27),1.3f*scale,leather);
+    oval(2,27,1.8f,1.8f,{.76f,.64f,.39f,1});
+    oval(0,44+breath,2.8f,4,skin);
+    oval(0,53+breath,7.5f,9,hair);
+    oval(.7f,51+breath,6.3f,7.5f,skin);
+    oval(-2,57+breath,6.5f,4.2f,hair);
+    oval(-6,53+breath,2,4.5f,hair);
+    bool back=hero&&facing.y>0;
+    if(back) oval(0,53+breath,7,8.2f,hair);
+    else {
+        float gaze=hero?facing.x*1.2f:.5f;
+        for(int side=-1;side<=1;side+=2) oval(gaze+side*2.1f,52+breath,.8f,1,{.16f,.18f,.18f,1});
+        oval(1.2f,49.5f+breath,1,1,{.84f,.64f,.48f,1});
+        if(id%5==0) oval(0,46+breath,4.3f,2.8f,shade(hair,1.6f));
+    }
+    if(id%4==0) {oval(0,60+breath,10,2.5f,shade(coat,.8f));oval(0,63+breath,6.5f,4,coat);}
+    if(id%4==1) {
+        limb(point(13,3),point(13,45),1.2f*scale,{.46f,.39f,.27f,1});
+        oval(13,45,2,2,{.58f,.48f,.32f,1});
+    }
+    if(hero) {
+        tri(point(-7,42),point(1,35),point(7,42),{.74f,.68f,.49f,1});
+        limb(point(-6,41),point(7,26),1.2f*scale,{.53f,.41f,.27f,1});
+        oval(8,24,4.5f,5.5f,leather);
+    }
 }
 void drawHerb(const Herb& h) {
-    if (h.picked) return; V s = screen(h.p); float bob = std::sin(timeNow * 2.5f) * 2;
-    for (int i = 5; i > 0; --i) ellipse(s.x, s.y + 14, 7 + i * 3, 5 + i * 2, { .40f,.82f,.82f,.025f });
-    rect(s.x, s.y + 8, 2, 16, { .30f,.61f,.39f,1 });
-    for (int i = 0; i < 5; ++i) { float a = i * 1.2566f; ellipse(s.x + std::cos(a) * 5, s.y + 18 + bob + std::sin(a) * 4, 4, 4, { .68f,.91f,.91f,1 }); }
+    if(h.picked) return; V s=screen(h.p); float bob=std::sin(timeNow*2.5f)*2;
+    for(int i=5;i>0;--i) ellipse(s.x,s.y+14,7+i*3,5+i*2,{.40f,.82f,.82f,.025f});
+    rect(s.x,s.y+8,2,16,{.30f,.61f,.39f,1});
+    for(int i=0;i<5;++i) {float a=i*1.2566f;ellipse(s.x+std::cos(a)*5,s.y+18+bob+std::sin(a)*4,4,4,{.68f,.91f,.91f,1});}
 }
 void objects() {
-    struct Item { V p; int kind, index; }; std::vector<Item> list;
-    for (int i = 0; i < (int)buildings.size(); ++i) list.push_back({ buildings[i].p,0,i });
-    for (int i = 0; i < (int)trees.size(); ++i) list.push_back({ trees[i].p,1,i });
-    for (int i = 0; i < (int)people.size(); ++i) list.push_back({ people[i].p,2,i });
-    for (int i = 0; i < (int)pillars.size(); ++i) list.push_back({ pillars[i].p,3,i });
-    for (int i = 0; i < (int)herbs.size(); ++i) list.push_back({ herbs[i].p,4,i });
-    list.push_back({ player,5,0 }); list.push_back({ Bell,6,0 }); list.push_back({ Well,7,0 });
-    std::stable_sort(list.begin(), list.end(), [](const Item& a, const Item& b) {return a.p.x + a.p.y < b.p.x + b.p.y; });
-    for (const auto& o : list) {
-        if (!visible(o.p)) continue; V s = screen(o.p);
-        switch (o.kind) {
-        case 0:house(buildings[o.index]); break;
-        case 1:tree(trees[o.index]); break;
-        case 2:character(o.p, people[o.index].coat, o.index); break;
-        case 3:box(o.p, 25, 18, pillars[o.index].height, { .54f,.57f,.52f,1 }); ellipse(s.x - 5, s.y + 12, 8, 5, { .29f,.42f,.29f,.8f }); break;
-        case 4:drawHerb(herbs[o.index]); break;
-        case 5:character(player, { .30f,.46f,.67f,1 }, 20, true); break;
+    struct Item {V p;int kind,index;}; std::vector<Item> list;
+    for(int i=0;i<(int)buildings.size();++i) list.push_back({buildings[i].p,0,i});
+    for(int i=0;i<(int)trees.size();++i) list.push_back({trees[i].p,1,i});
+    for(int i=0;i<(int)people.size();++i) list.push_back({people[i].p,2,i});
+    for(int i=0;i<(int)pillars.size();++i) list.push_back({pillars[i].p,3,i});
+    for(int i=0;i<(int)herbs.size();++i) list.push_back({herbs[i].p,4,i});
+    list.push_back({player,5,0});list.push_back({Bell,6,0});list.push_back({Well,7,0});
+    std::stable_sort(list.begin(),list.end(),[](const Item&a,const Item&b){return a.p.x+a.p.y<b.p.x+b.p.y;});
+    for(const auto& o:list) {if(!visible(o.p)) continue; V s=screen(o.p);
+        switch(o.kind) {
+        case 0:house(buildings[o.index]);break;
+        case 1:tree(trees[o.index]);break;
+        case 2:character(o.p,people[o.index].coat,o.index);break;
+        case 3:box(o.p,25,18,pillars[o.index].height,{.54f,.57f,.52f,1});ellipse(s.x-5,s.y+12,8,5,{.29f,.42f,.29f,.8f});break;
+        case 4:drawHerb(herbs[o.index]);break;
+        case 5:character(player,{.30f,.46f,.67f,1},20,true);break;
         case 6:
-            box(Bell, 48, 25, 10, { .50f,.51f,.47f,1 });
-            rect(s.x - 19, s.y + 34, 6, 63, { .34f,.29f,.22f,1 }); rect(s.x + 19, s.y + 34, 6, 63, { .34f,.29f,.22f,1 });
-            rect(s.x, s.y + 65, 48, 6, { .39f,.33f,.24f,1 }); ellipse(s.x, s.y + 44, 14, 17, { .69f,.54f,.29f,1 });
-            ellipse(s.x, s.y + 32, 18, 5, { .81f,.67f,.37f,1 }); break;
-        case 7:box(Well, 40, 24, 20, { .51f,.55f,.54f,1 }); ellipse(s.x, s.y + 21, 14, 6, { .16f,.31f,.35f,1 }); break;
+            box(Bell,48,25,10,{.50f,.51f,.47f,1});
+            rect(s.x-19,s.y+34,6,63,{.34f,.29f,.22f,1});rect(s.x+19,s.y+34,6,63,{.34f,.29f,.22f,1});
+            rect(s.x,s.y+65,48,6,{.39f,.33f,.24f,1});ellipse(s.x,s.y+44,14,17,{.69f,.54f,.29f,1});
+            ellipse(s.x,s.y+32,18,5,{.81f,.67f,.37f,1});break;
+        case 7:box(Well,40,24,20,{.51f,.55f,.54f,1});ellipse(s.x,s.y+21,14,6,{.16f,.31f,.35f,1});break;
         }
     }
 }
-std::wstring wrap(const std::wstring& s, int columns) {
-    std::wstring out; int n = 0;
-    for (wchar_t ch : s) { int size = ch < 128 ? 1 : 2; if (ch == L'\n') n = 0; else if (n + size > columns) { out += L'\n'; n = 0; }out += ch; n += size; }
+std::wstring wrap(const std::wstring& s,int columns) {
+    std::wstring out;float n=0,limit=columns*12.f;
+    for(wchar_t ch:s) {
+        if(ch==L'\n') {out+=ch;n=0;continue;}
+        float size=renderer->TextAdvance(ch);
+        if(n+size>limit&&n>0) {out+=L'\n';n=0;}
+        out+=ch;n+=size;
+    }
     return out;
 }
 void hud() {
-    float left = -width * .5f + 24, top = height * .5f - 34;
-    std::wstring objective = stage == 0 ? L"Àú³á Á¾  ¡¤  ¸¶¶ó ÃÌÀå°ú ´ëÈ­" : stage == 1 ? L"´ŞºûÇ® ¸ğÀ¸±â  " + std::to_wstring(collected) + L" / 3" : stage == 2 ? L"±¤ÀåÀÇ Á¾¿¡ ´ŞºûÇ® ³õ±â" : L"Àú³á Á¾  ¡¤  ¿Ï·á";
-    float headerWidth = std::min(530.f, float(width) - 48);
-    rect(left + headerWidth / 2 - 8, top - 26, headerWidth, 90, { .07f,.10f,.10f,.86f });
-    text(left, top, wrap(objective, std::max(12, int((headerWidth - 24) / 12))));
-    text(left, top - 32, L"WASD ÀÌµ¿   E ´ëÈ­¡¤Á¶»ç   R Àç½ÃÀÛ");
-    const wchar_t* area = ruin(player) ? L"ÀØÈù ¿¹¹è´ç" : dist(player, Lake) < 8 ? L"°í¿äÇÑ È£¼ö" : player.x < 12 ? L"ºÓÀº ½Ç ½£" : L"´Şºû¸¶À»";
-    text(width * .5f - 220, width < 900 ? top - 110 : top, area);
+    float left=-width*.5f+24,top=height*.5f-34;
+    std::wstring objective=stage==0?L"ì €ë… ì¢…  Â·  ë§ˆë¼ ì´Œì¥ê³¼ ëŒ€í™”":stage==1?L"ë‹¬ë¹›í’€ ëª¨ìœ¼ê¸°  "+std::to_wstring(collected)+L" / 3":stage==2?L"ê´‘ì¥ì˜ ì¢…ì— ë‹¬ë¹›í’€ ë†“ê¸°":L"ì €ë… ì¢…  Â·  ì™„ë£Œ";
+    float headerWidth=std::min(530.f,float(width)-48);
+    std::wstring objectiveLines=wrap(objective,std::max(12,int((headerWidth-24)/12)));
+    int objectiveRows=1+int(std::count(objectiveLines.begin(),objectiveLines.end(),L'\n'));
+    float headerHeight=objectiveRows*32.f+64;
+    rect(left+headerWidth/2-8,top+22-headerHeight/2,headerWidth,headerHeight,{.07f,.10f,.10f,.86f});
+    text(left,top,objectiveLines);
+    text(left,top-objectiveRows*32.f-4,L"WASD ì´ë™  E ëŒ€í™”  R ì¬ì‹œì‘  T ì‚¬ëƒ¥í„°");
+    const wchar_t* area=ruin(player)?L"ìŠíŒ ì˜ˆë°°ë‹¹":dist(player,Lake)<8?L"ê³ ìš”í•œ í˜¸ìˆ˜":player.x<12?L"ë¶‰ì€ ì‹¤ ìˆ²":L"ë‹¬ë¹›ë§ˆì„";
+    text(width*.5f-220,width<900?top-110:top,area);
     // Objective marker stays at the viewport edge when the target is off screen.
-    V target = stage == 0 ? people[0].p : Bell;
-    if (stage == 1) { float nearest = 1000; for (const auto& h : herbs) if (!h.picked && dist(player, h.p) < nearest) { target = h.p; nearest = dist(player, h.p); } }
-    if (stage < 3) {
-        V s = screen(target); float limitX = std::max(80.f, width * .5f - 55), limitY = std::max(80.f, height * .5f - 180);
-        float factor = std::max(1.f, std::max(std::abs(s.x) / limitX, std::abs(s.y) / limitY)); s.x /= factor; s.y /= factor;
-        diamond({ s.x,s.y + 70 }, 12, 18, { .97f,.80f,.39f,1 });
+    V target=stage==0?people[0].p:Bell;
+    if(stage==1) {float nearest=1000;for(const auto& h:herbs) if(!h.picked&&dist(player,h.p)<nearest){target=h.p;nearest=dist(player,h.p);}}
+    if(stage<3) {V s=screen(target);float limitX=std::max(80.f,width*.5f-55),limitY=std::max(80.f,height*.5f-180);
+        float factor=std::max(1.f,std::max(std::abs(s.x)/limitX,std::abs(s.y)/limitY));s.x/=factor;s.y/=factor;
+        diamond({s.x,s.y+70},12,18,{.97f,.80f,.39f,1});}
+    float panelWidth=std::min(900.f,float(width)-48);
+    if(messageTime>0) {
+        std::wstring lines=wrap(message,std::max(12,int((panelWidth-40)/12)));
+        int rows=1+int(std::count(lines.begin(),lines.end(),L'\n'));
+        float h=rows*32.f+28;
+        rect(0,-height*.5f+45+h/2,panelWidth,h,{.055f,.075f,.08f,.92f});
+        text(-panelWidth/2+20,-height*.5f+45+h-32,lines);
     }
-    float panelWidth = std::min(900.f, float(width) - 48);
-    if (messageTime > 0) {
-        std::wstring lines = wrap(message, std::max(12, int((panelWidth - 40) / 12)));
-        int rows = 1 + int(std::count(lines.begin(), lines.end(), L'\n'));
-        float h = rows * 27.f + 28;
-        rect(0, -height * .5f + 45 + h / 2, panelWidth, h, { .055f,.075f,.08f,.92f });
-        text(-panelWidth / 2 + 20, -height * .5f + 45 + h - 27, lines);
-    }
-    int n = nearPerson();
-    std::wstring prompt = stage == 1 && nearHerb() >= 0 ? L"E  ´ŞºûÇ® Áİ±â" : n >= 0 ? std::wstring(L"E  ´ëÈ­: ") + people[n].name : dist(player, Bell) < 1.2f ? L"E  Á¾ »ìÆìº¸±â" : dist(player, Ruin) < 2 ? L"E  ±â³äºñ Á¶»ç" : L"";
-    text(-panelWidth / 2 + 20, -height * .5f + 16, prompt, { .96f,.82f,.50f,1 });
+    int n=nearPerson();
+    std::wstring prompt=stage==1&&nearHerb()>=0?L"E  ë‹¬ë¹›í’€ ì¤ê¸°":n>=0?std::wstring(L"E  ëŒ€í™”: ")+people[n].name:dist(player,Bell)<1.2f?L"E  ì¢… ì‚´í´ë³´ê¸°":dist(player,Ruin)<2?L"E  ê¸°ë…ë¹„ ì¡°ì‚¬":L"";
+    text(-panelWidth/2+20,-height*.5f+16,prompt,{.96f,.82f,.50f,1});
 }
 void render() {
-    glClearColor(.13f, .22f, .20f, 1); renderer->SetWorld(camera.x, camera.y, timeNow); renderer->BeginFrame();
-    ground(); objects(); renderer->EndFrame(timeNow); hud(); glutSwapBuffers();
+    if(firstLevelActive){FirstLevel::Draw(*renderer,width,height);glutSwapBuffers();return;}
+    glClearColor(.13f,.22f,.20f,1);renderer->SetWorld(camera.x,camera.y,timeNow);renderer->BeginFrame();
+    ground();objects();renderer->EndFrame(timeNow);hud();glutSwapBuffers();
 }
 void idle() {
-    float now = glutGet(GLUT_ELAPSED_TIME) * .001f, dt = std::min(.04f, now - lastTime); lastTime = now; timeNow += dt; messageTime -= dt;
+    float now=glutGet(GLUT_ELAPSED_TIME)*.001f,dt=std::min(.04f,now-lastTime);lastTime=now;timeNow+=dt;messageTime-=dt;
+    if(firstLevelActive){FirstLevel::Update(dt);glutPostRedisplay();return;}
     // Screen-relative movement is transformed back to the isometric plane.
-    float sx = float(keys['d']) - float(keys['a']), sy = float(keys['w']) - float(keys['s']);
-    V v = { sx - sy,-sx - sy }; float len = std::hypot(v.x, v.y); V old = player;
-    if (len > 0) { v.x /= len; v.y /= len; V p = { player.x + v.x * 3.8f * dt,player.y }; if (!blocked(p))player = p; p = { player.x,player.y + v.y * 3.8f * dt }; if (!blocked(p))player = p; facing = { sx,sy }; }
-    moving = dist(old, player) > .0001f; if (moving)walk += dt * 10;
-    camera = iso(player); camera.y -= 20; glutPostRedisplay();
+    float sx=float(keys['d'])-float(keys['a']),sy=float(keys['w'])-float(keys['s']);
+    V v={sx-sy,-sx-sy};float len=std::hypot(v.x,v.y);V old=player;
+    if(len>0) {v.x/=len;v.y/=len;V p={player.x+v.x*3.8f*dt,player.y};if(!blocked(p))player=p;p={player.x,player.y+v.y*3.8f*dt};if(!blocked(p))player=p;facing={sx,sy};}
+    moving=dist(old,player)>.0001f;if(moving)walk+=dt*10;
+    camera=iso(player);camera.y-=20;glutPostRedisplay();
 }
-void down(unsigned char key, int, int) {
-    if (key == 27) { glutLeaveMainLoop(); return; }
-    if (key >= 'A' && key <= 'Z')key += 32;
-    if (keys[key])return; keys[key] = true;
-    if (key == 'e')interact(); if (key == 'r')reset();
+void down(unsigned char key,int,int) {
+    if(key==27){glutLeaveMainLoop();return;}
+    if(key>='A'&&key<='Z')key+=32;
+    if(key=='t'){
+        firstLevelActive=!firstLevelActive;
+        std::fill(keys,keys+256,false);
+        FirstLevel::ClearInput();
+        SetWindowTextW(WindowFromDC(wglGetCurrentDC()),firstLevelActive?L"ë‹¬ë¹›ë§ˆì„ - ì”í–¥ì˜ ìˆ²":L"ë‹¬ë¹›ë§ˆì„ - ì €ë… ì¢…");
+        return;
+    }
+    if(firstLevelActive){FirstLevel::KeyDown(key);return;}
+    if(keys[key])return;keys[key]=true;
+    if(key=='e')interact();if(key=='r')reset();
 }
-void up(unsigned char key, int, int) { if (key >= 'A' && key <= 'Z')key += 32; keys[key] = false; }
-void resize(int w, int h) { width = std::max(1, w); height = std::max(1, h); if (renderer)renderer->SetWindowSize(width, height); }
-void closeGame() { delete renderer; renderer = nullptr; }
-int main(int argc, char** argv) {
-    glutInit(&argc, argv); glutInitDisplayMode(GLUT_DOUBLE | GLUT_RGBA);
-    glutInitWindowSize(width, height); glutCreateWindow("Moonlit Village");
-    SetWindowTextW(WindowFromDC(wglGetCurrentDC()), L"´Şºû¸¶À» - Àú³á Á¾");
-    if (glewInit() != GLEW_OK || !GLEW_VERSION_3_3) { MessageBoxW(nullptr, L"OpenGL 3.3À» Áö¿øÇÏ´Â ±×·¡ÇÈ µå¶óÀÌ¹ö°¡ ÇÊ¿äÇÕ´Ï´Ù.", L"ÃÊ±âÈ­ ¿À·ù", MB_OK); return 1; }
-    renderer = new Renderer(width, height); if (!renderer->IsInitialized()) { delete renderer; return 1; }
-    glDisable(GL_DEPTH_TEST); glEnable(GL_BLEND); glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-    glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE, GLUT_ACTION_GLUTMAINLOOP_RETURNS); glutIgnoreKeyRepeat(1);
-    reset(); lastTime = glutGet(GLUT_ELAPSED_TIME) * .001f;
-    glutDisplayFunc(render); glutIdleFunc(idle); glutKeyboardFunc(down); glutKeyboardUpFunc(up); glutReshapeFunc(resize); glutCloseFunc(closeGame);
-    glutMainLoop(); return 0;
+void up(unsigned char key,int,int) {if(key>='A'&&key<='Z')key+=32;keys[key]=false;FirstLevel::KeyUp(key);}
+void mouse(int button,int state,int x,int y) {
+    if(firstLevelActive&&button==GLUT_LEFT_BUTTON)FirstLevel::MouseButton(state==GLUT_DOWN,x,y,width,height);
+}
+void resize(int w,int h) {width=std::max(1,w);height=std::max(1,h);if(renderer)renderer->SetWindowSize(width,height);}
+void closeGame() {FirstLevel::Shutdown();delete renderer;renderer=nullptr;}
+int main(int argc,char** argv) {
+    SetProcessDPIAware();
+    glutInit(&argc,argv);glutInitDisplayMode(GLUT_DOUBLE|GLUT_RGBA);
+    glutInitWindowSize(width,height);glutCreateWindow("Moonlit Village");
+    SetWindowTextW(WindowFromDC(wglGetCurrentDC()),L"ë‹¬ë¹›ë§ˆì„ - ì”í–¥ì˜ ìˆ²");
+    if(glewInit()!=GLEW_OK||!GLEW_VERSION_3_3){MessageBoxW(nullptr,L"OpenGL 3.3ì„ ì§€ì›í•˜ëŠ” ê·¸ë˜í”½ ë“œë¼ì´ë²„ê°€ í•„ìš”í•©ë‹ˆë‹¤.",L"ì´ˆê¸°í™” ì˜¤ë¥˜",MB_OK);return 1;}
+    renderer=new Renderer(width,height);if(!renderer->IsInitialized()){delete renderer;return 1;}
+    glDisable(GL_DEPTH_TEST);glEnable(GL_BLEND);glBlendFunc(GL_SRC_ALPHA,GL_ONE_MINUS_SRC_ALPHA);
+    glutSetOption(GLUT_ACTION_ON_WINDOW_CLOSE,GLUT_ACTION_GLUTMAINLOOP_RETURNS);glutIgnoreKeyRepeat(1);
+    reset();lastTime=glutGet(GLUT_ELAPSED_TIME)*.001f;
+    FirstLevel::Initialize();
+    glutDisplayFunc(render);glutIdleFunc(idle);glutKeyboardFunc(down);glutKeyboardUpFunc(up);glutReshapeFunc(resize);glutCloseFunc(closeGame);
+    glutMouseFunc(mouse);
+    HWND gameWindow=WindowFromDC(wglGetCurrentDC());
+    if(gameWindow) {
+        ShowWindow(gameWindow,SW_MAXIMIZE);
+        RECT clientRect={};
+        if(GetClientRect(gameWindow,&clientRect))
+            resize(clientRect.right-clientRect.left,clientRect.bottom-clientRect.top);
+    }
+    glutMainLoop();return 0;
 }
